@@ -30,10 +30,14 @@ pub fn merge(prev: Option<Value>, input: &Value, action: &Action, now: u64) -> O
     let tasks_changed = update_tasks(&mut rec, input) | update_background(&mut rec, input);
     match action {
         Action::Write { state, detail } => {
-            let cwd = str_field(input, "cwd").unwrap_or("");
             rec.insert("session_id".into(), json!(str_field(input, "session_id")));
-            rec.insert("project".into(), json!(state::file_name(cwd)));
-            rec.insert("cwd".into(), json!(cwd));
+            // Each event carries the shell's current folder, which follows a
+            // `cd`. The project is the folder the session started in.
+            if !rec.contains_key("cwd") {
+                let cwd = str_field(input, "cwd").unwrap_or("");
+                rec.insert("project".into(), json!(state::file_name(cwd)));
+                rec.insert("cwd".into(), json!(cwd));
+            }
             rec.insert("state".into(), json!(state.as_str()));
             rec.insert("detail".into(), json!(detail));
             // The turn ended but shells or subagents it launched still run:
@@ -530,6 +534,26 @@ mod tests {
         );
         let r = step(r, ev("Stop", json!({})), 4).unwrap();
         assert_eq!(r["state"], "done");
+    }
+
+    #[test]
+    fn project_stays_on_the_starting_folder() {
+        let r = step(None, ev("UserPromptSubmit", json!({ "prompt": "x" })), 1).unwrap();
+        let mut bash = ev(
+            "PreToolUse",
+            json!({ "tool_name": "Bash", "tool_input": {} }),
+        );
+        bash["cwd"] = json!("/w/Lulo/crates/src");
+        let r = step(Some(r), bash, 2).unwrap();
+        assert_eq!(
+            (r["project"].as_str(), r["cwd"].as_str()),
+            (Some("Lulo"), Some("/w/Lulo"))
+        );
+
+        let mut start = ev("SessionStart", json!({}));
+        start["cwd"] = json!("/w/Other");
+        let r = step(Some(r), start, 3).unwrap();
+        assert_eq!(r["project"], "Other");
     }
 
     #[test]
