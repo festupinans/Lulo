@@ -9,7 +9,6 @@ mod install;
 mod progress;
 mod state;
 mod status;
-mod usage;
 
 use std::io::{IsTerminal, Read};
 use std::path::{Path, PathBuf};
@@ -23,7 +22,6 @@ USAGE:
     lulo-hook hook                  Handle one hook event (JSON on stdin). Used by Claude Code.
     lulo-hook install [OPTIONS]     Add Lulo's hooks to ~/.claude/settings.json (backs it up first).
     lulo-hook uninstall [OPTIONS]   Remove Lulo's hooks from settings.json.
-    lulo-hook statusline            Status line mode: save plan usage for the widget, print a line.
     lulo-hook status-dir            Print the folder where session files are written.
 
 OPTIONS:
@@ -51,10 +49,6 @@ fn main() -> ExitCode {
         }
         None | Some("hook") => {
             run_hook();
-            ExitCode::SUCCESS
-        }
-        Some("statusline") => {
-            run_statusline();
             ExitCode::SUCCESS
         }
         Some("install") => report(cmd_install(&args[1..])),
@@ -94,21 +88,6 @@ fn run_hook() {
     }
 }
 
-fn run_statusline() {
-    let mut raw = Vec::with_capacity(4096);
-    if std::io::stdin().read_to_end(&mut raw).is_err() {
-        return;
-    }
-    let Ok(input) = serde_json::from_slice(&raw) else {
-        return;
-    };
-    let line = match status::status_dir() {
-        Some(dir) => usage::apply(&dir, &input),
-        None => usage::line(&input, 0),
-    };
-    println!("{line}");
-}
-
 /// Copies this .exe to a fixed folder (so the registered path survives the
 /// download being moved or deleted) and installs the hooks pointing there.
 fn double_click_setup() -> Result<(), String> {
@@ -122,8 +101,7 @@ fn double_click_setup() -> Result<(), String> {
     }
     let settings =
         install::default_settings_path().ok_or("no se encontró tu carpeta de usuario")?;
-    let outcome = install::install(&settings, &target).map_err(|e| e.to_string())?;
-    let backup = outcome.backup;
+    let backup = install::install(&settings, &target).map_err(|e| e.to_string())?;
 
     println!("Listo. Hook copiado en:   {}", target.display());
     println!("Hooks añadidos en:        {}", settings.display());
@@ -132,14 +110,6 @@ fn double_click_setup() -> Result<(), String> {
     }
     if let Some(status) = status::status_dir() {
         println!("Estados de las sesiones:  {}", status.display());
-    }
-    if !outcome.status_line {
-        println!(
-            "\nAviso: ya tienes una línea de estado propia, así que no la toqué. \
-             Los anillos de uso de Lulo necesitan la de Lulo; quita \"statusLine\" \
-             de {} y vuelve a instalar si la quieres.",
-            settings.display()
-        );
     }
     // Bring the widget along when it was downloaded next to the hook, and open it.
     let widget_name = format!("lulo-widget{}", std::env::consts::EXE_SUFFIX);
@@ -179,13 +149,10 @@ fn cmd_install(args: &[String]) -> Result<(), String> {
             std::env::current_exe().map_err(|e| format!("could not locate this executable: {e}"))?
         }
     };
-    let outcome = install::install(&settings, &exe).map_err(|e| e.to_string())?;
+    let backup = install::install(&settings, &exe).map_err(|e| e.to_string())?;
     println!("Lulo hooks installed in {}", settings.display());
     println!("Hook binary: {}", exe.display());
-    if !outcome.status_line {
-        println!("Kept your own statusLine, so the widget's usage rings get no data.");
-    }
-    if let Some(b) = outcome.backup {
+    if let Some(b) = backup {
         println!("Backup of the previous file: {}", b.display());
     }
     println!("Open sessions pick up the change after a restart (or /hooks).");

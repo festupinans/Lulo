@@ -3,8 +3,8 @@
 //!
 //! Collapsed, the octopus peeks out from under the moon upside down, its
 //! eyes acting out what most needs you, with one colored dot per active
-//! session. Hovering it drops the plan usage rings and one chip per session
-//! under the moon, with nothing behind them.
+//! session. Hovering it drops one chip per session under the moon, with
+//! nothing behind them.
 //!
 //! It watches the folder `lulo-hook` writes to. Without animations it only
 //! redraws when a file changes or the mouse is over it (plus a slow tick);
@@ -14,13 +14,11 @@
 // No console window behind the widget on Windows.
 #![cfg_attr(windows, windows_subsystem = "windows")]
 
-mod account;
 mod autostart;
 mod fonts;
 mod glass;
 mod island;
 mod octopus;
-mod rings;
 mod sessions;
 mod settings;
 mod style;
@@ -56,9 +54,8 @@ const DOT_R: f32 = 2.4;
 const DOT_STEP: f32 = 8.0;
 const MAX_DOTS: usize = 10;
 
-// Open: rings and chips hang just under the moon.
+// Open: the chips hang just under the moon.
 const ROW_GAP: f32 = 2.0;
-const RINGS: f32 = 64.0;
 const COLUMNS: usize = 4;
 const CHIP_W: f32 = 144.0;
 const CHIP_H: f32 = 50.0;
@@ -66,7 +63,7 @@ const GAP: f32 = 6.0;
 const CHIP_OCTOPUS: f32 = 30.0;
 /// Window size needed while the right-click menu is open.
 const MENU_ROOM: Vec2 = vec2(190.0, 110.0);
-/// Solid backgrounds for the rings and the chips.
+/// Solid backgrounds for the chips.
 const SOLID: Color32 = Color32::from_rgb(23, 23, 30);
 const SOLID_HOVER: Color32 = Color32::from_rgb(40, 40, 52);
 
@@ -98,8 +95,6 @@ fn main() -> eframe::Result {
 struct App {
     dir: Option<PathBuf>,
     sessions: Vec<Session>,
-    usage: Option<rings::Usage>,
-    refill: rings::Refill,
     /// Set by the watcher thread; the UI thread reloads when it sees it.
     dirty: Arc<AtomicBool>,
     /// Kept alive for as long as the app runs.
@@ -121,18 +116,12 @@ impl App {
         let watcher = dir
             .as_ref()
             .and_then(|d| watch(d, &dirty, cc.egui_ctx.clone()));
-        if let (Some(dir), true) = (&dir, settings.account_usage) {
-            let ctx = cc.egui_ctx.clone();
-            account::start(dir.clone(), move || ctx.request_repaint());
-        }
         fonts::install(&cc.egui_ctx);
         cc.egui_ctx.set_visuals(egui::Visuals::dark());
         glass::apply(cc);
         App {
             dir,
             sessions: Vec::new(),
-            usage: None,
-            refill: rings::Refill::default(),
             dirty,
             _watcher: watcher,
             last_load: None,
@@ -219,7 +208,6 @@ impl eframe::App for App {
         if self.dirty.swap(false, Ordering::Relaxed) || stale {
             if let Some(dir) = &self.dir {
                 self.sessions = sessions::load(dir, now, self.settings.forget_secs());
-                self.usage = rings::Usage::load(dir);
             }
             self.last_load = Some(Instant::now());
         }
@@ -272,15 +260,11 @@ impl eframe::App for App {
             .map(|(_, st)| *st)
             .filter(|st| *st != "inactive")
             .collect();
-        let usage = self.usage.map(|u| {
-            let (left, time) = u.fractions(now);
-            (self.refill.value(left, t, self.settings.animate), time)
-        });
-        let open = self.expanded && (!rows.is_empty() || usage.is_some());
+        let open = self.expanded && !rows.is_empty();
         let moon = moon_size(active.len());
         let mut size = moon;
         if open {
-            size = self.draw_open(ui, full.min, moon, &rows, state, usage, t);
+            size = self.draw_open(ui, full.min, moon, &rows, t);
         }
         // Last, so the moon and the peeking head sit over everything else.
         draw_moon(
@@ -340,65 +324,33 @@ fn draw_moon(
 }
 
 impl App {
-    /// The open widget under the half moon: the usage rings and one chip per
-    /// session, with nothing behind them. Returns the size of everything
-    /// together, moon included.
-    #[allow(clippy::too_many_arguments)]
+    /// The open widget under the half moon: one chip per session, with
+    /// nothing behind them. Returns the size of everything together, moon
+    /// included.
     fn draw_open(
         &mut self,
         ui: &mut egui::Ui,
         origin: Pos2,
         moon: Vec2,
         rows: &[(&Session, &str)],
-        state: &str,
-        usage: Option<(f32, f32)>,
         t: f64,
     ) -> Vec2 {
         let cols = rows.len().clamp(1, COLUMNS);
         let lines = rows.len().div_ceil(COLUMNS);
-        let rings_w = if usage.is_some() { RINGS } else { 0.0 };
-        let chips_w = if rows.is_empty() {
-            0.0
-        } else {
-            cols as f32 * CHIP_W + (cols - 1) as f32 * GAP
-        };
-        let gap = if rings_w > 0.0 && chips_w > 0.0 {
-            GAP
-        } else {
-            0.0
-        };
-        let row_w = rings_w + gap + chips_w;
-        let chips_h = lines as f32 * CHIP_H + lines.saturating_sub(1) as f32 * GAP;
-        let row_h = chips_h.max(rings_w);
+        let row_w = cols as f32 * CHIP_W + (cols - 1) as f32 * GAP;
+        let row_h = lines as f32 * CHIP_H + lines.saturating_sub(1) as f32 * GAP;
         let width = row_w.max(moon.x);
         let top = origin.y + moon.y + ROW_GAP;
         let size = vec2(width, top - origin.y + row_h);
 
-        let center = origin.x + width / 2.0;
-        let mut x = center - row_w / 2.0;
-        if let Some((left, time)) = usage {
-            let ring =
-                Rect::from_min_size(pos2(x, top + (row_h - RINGS) / 2.0), Vec2::splat(RINGS));
-            ui.painter()
-                .circle_filled(ring.center(), RINGS / 2.0, SOLID);
-            rings::paint(
-                ui.painter(),
-                ring.shrink(RINGS * 0.05),
-                left,
-                time,
-                state,
-                t,
-            );
-            x += rings_w + gap;
-        }
-        let chips_top = top + (row_h - chips_h) / 2.0;
+        let x = origin.x + (width - row_w) / 2.0;
         let mut hovered = self.hovered.clone();
         for (i, (s, st)) in rows.iter().enumerate() {
             let (col, line) = (i % COLUMNS, i / COLUMNS);
             let chip = Rect::from_min_size(
                 pos2(
                     x + col as f32 * (CHIP_W + GAP),
-                    chips_top + line as f32 * (CHIP_H + GAP),
+                    top + line as f32 * (CHIP_H + GAP),
                 ),
                 vec2(CHIP_W, CHIP_H),
             );

@@ -55,24 +55,13 @@ pub fn default_install_dir() -> Option<PathBuf> {
     env("HOME").map(|h| h.join(".local").join("share").join("lulo"))
 }
 
-pub struct Installed {
-    /// The previous settings file, if one existed.
-    pub backup: Option<PathBuf>,
-    /// Whether Lulo's status line is set. False when the user has their own.
-    pub status_line: bool,
-}
-
-/// Installs the hooks and, unless the user has their own, the status line.
-pub fn install(settings_path: &Path, exe: &Path) -> io::Result<Installed> {
+/// Installs the hooks and drops the status line older versions of Lulo set.
+/// Returns the backup of the previous settings file, if one existed.
+pub fn install(settings_path: &Path, exe: &Path) -> io::Result<Option<PathBuf>> {
     let mut settings = read_settings(settings_path)?;
-    let exe = exe.to_string_lossy();
-    add_hooks(&mut settings, &exe)?;
-    let status_line = add_status_line(&mut settings, &exe);
-    let backup = save(settings_path, &settings)?;
-    Ok(Installed {
-        backup,
-        status_line,
-    })
+    add_hooks(&mut settings, &exe.to_string_lossy())?;
+    remove_status_line(&mut settings);
+    save(settings_path, &settings)
 }
 
 pub fn uninstall(settings_path: &Path) -> io::Result<Option<PathBuf>> {
@@ -190,28 +179,7 @@ pub fn remove_hooks(settings: &mut Value) -> bool {
     changed
 }
 
-/// Sets `statusLine` to run `exe statusline`, unless the user already has a
-/// status line of their own. Returns whether Lulo's is in place.
-pub fn add_status_line(settings: &mut Value, exe: &str) -> bool {
-    let Some(root) = settings.as_object_mut() else {
-        return false;
-    };
-    if root
-        .get("statusLine")
-        .is_some_and(|s| !is_lulo_status_line(s))
-    {
-        return false;
-    }
-    // The status line only has a shell form. Forward slashes and quotes work
-    // the same in Git Bash, cmd and sh.
-    let command = format!("\"{}\" statusline", exe.replace('\\', "/"));
-    root.insert(
-        "statusLine".to_string(),
-        json!({ "type": "command", "command": command, "padding": 0 }),
-    );
-    true
-}
-
+/// Removes the plan usage status line older versions of Lulo installed.
 pub fn remove_status_line(settings: &mut Value) -> bool {
     let Some(root) = settings.as_object_mut() else {
         return false;
@@ -324,19 +292,9 @@ mod tests {
     }
 
     #[test]
-    fn status_line_is_added_and_removed() {
-        let mut s = json!({ "model": "opus" });
-        assert!(add_status_line(&mut s, EXE));
-        assert_eq!(
-            s["statusLine"]["command"],
-            "\"C:/Users/me/AppData/Local/Lulo/lulo-hook.exe\" statusline"
-        );
-        // Reinstalling from a new place replaces Lulo's own line.
-        assert!(add_status_line(&mut s, "/opt/lulo/lulo-hook"));
-        assert_eq!(
-            s["statusLine"]["command"],
-            "\"/opt/lulo/lulo-hook\" statusline"
-        );
+    fn old_status_line_is_removed() {
+        let old = json!({ "type": "command", "command": "\"C:/Users/me/AppData/Local/Lulo/lulo-hook.exe\" statusline" });
+        let mut s = json!({ "model": "opus", "statusLine": old });
         assert!(remove_status_line(&mut s));
         assert_eq!(s, json!({ "model": "opus" }));
     }
@@ -345,7 +303,6 @@ mod tests {
     fn users_own_status_line_is_kept() {
         let own = json!({ "type": "command", "command": "~/.claude/statusline.sh" });
         let mut s = json!({ "statusLine": own.clone() });
-        assert!(!add_status_line(&mut s, EXE));
         assert!(!remove_status_line(&mut s));
         assert_eq!(s["statusLine"], own);
     }

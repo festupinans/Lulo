@@ -17,16 +17,15 @@ Funciona con [hooks de Claude Code](https://code.claude.com/docs/en/hooks): cada
 2. Haz doble clic en `lulo-hook.exe`. Se copia a `%LOCALAPPDATA%\Lulo\lulo-hook.exe` y añade los hooks a `~/.claude/settings.json` sin tocar el resto del archivo, guardando antes una copia (`settings.json.lulo-backup-<fecha>`). Puedes repetirlo cuando quieras: nunca duplica entradas. Si `lulo-widget.exe` está en la misma carpeta, también lo copia y lo abre.
 3. Reinicia las sesiones de Claude Code abiertas para que carguen los hooks.
 
-Desde una terminal también funcionan `lulo-hook.exe install`, `lulo-hook.exe uninstall` y `lulo-hook.exe status-dir` (carpeta donde escribe los estados). La instalación también configura la línea de estado que alimenta los anillos de uso.
+Desde una terminal también funcionan `lulo-hook.exe install`, `lulo-hook.exe uninstall` y `lulo-hook.exe status-dir` (carpeta donde escribe los estados).
 
 ## Abrir el widget
 
 Haz doble clic en `lulo-widget.exe`. Aparece como una media luna oscura pegada al borde de arriba, en el centro de la pantalla, siempre encima y fuera de la barra de tareas.
 
 - **Plegada:** solo la media luna, sin texto. El pulpo cuelga de cabeza y asoma la coronilla y los ojos, y debajo hay un punto de color por cada sesión activa. Los ojos siguen a la sesión que más te necesita: miran a los lados si una espera, se vuelven X con un error, sonríen al terminar y se cierran si no hay actividad.
-- **Al pasar el ratón:** debajo de la luna aparecen los anillos de uso y una ficha por sesión (pulpo, proyecto, estado y barra de tareas hechas), sin marco ni fondo. Se vuelve a plegar al sacar el ratón.
+- **Al pasar el ratón:** debajo de la luna aparece una ficha por sesión (pulpo, proyecto, estado y barra de tareas hechas), sin marco ni fondo. Se vuelve a plegar al sacar el ratón.
 - **El pulpo de cada ficha:** hace la escena de ese estado. Piensa, teclea frente al PC, mira la terminal, busca con lupa, llama a pulpitos ayudantes, espera impaciente, salta al terminar, tiembla con un error y duerme si no hay actividad.
-- **Anillos de uso:** dos anillos alrededor del pulpo, a la izquierda de las fichas. El de color es el uso que te queda en la ventana de 5 horas de tu plan (verde, ámbar desde la mitad, rojo y latiendo al final). El blanco, más fino, es el tiempo que falta para que se restablezca. Ver [Sobre los anillos de uso](#sobre-los-anillos-de-uso).
 - **Segundo plano:** si Claude termina su turno pero dejó comandos o subagentes corriendo en segundo plano, la sesión sale «En segundo plano» en vez de «Terminó», hasta que Claude Code avisa que acabaron.
 - **Menú (clic derecho):** "Iniciar con Windows" y "Cerrar Lulo".
 - **Inactiva:** una sesión sin eventos durante 5 minutos pasa a "Inactiva" y baja al final. "Esperando" nunca pasa a inactiva, porque necesita que respondas.
@@ -36,17 +35,8 @@ Haz doble clic en `lulo-widget.exe`. Aparece como una media luna oscura pegada a
 La configuración está en `%LOCALAPPDATA%\Lulo\widget.json`:
 
 ```json
-{ "animate": true, "inactive_minutes": 5, "forget_hours": 12, "account_usage": true }
+{ "animate": true, "inactive_minutes": 5, "forget_hours": 12 }
 ```
-
-### Sobre los anillos de uso
-
-Los hooks de Claude Code no traen el uso del plan. Lulo lo obtiene de dos formas y usa la más reciente:
-
-- **Línea de estado (terminal):** la instalación pone `lulo-hook.exe statusline` como línea de estado en `settings.json`. Guarda el uso en `claude-status\_usage.json` y muestra en la terminal algo como `Opus · Lulo · 5 h: 34 % usado, reinicia en 2 h 10 min`. Si ya tenías una línea de estado propia, Lulo no la toca y te avisa.
-- **Tu cuenta (app de escritorio):** la app no ejecuta la línea de estado, así que el widget consulta el uso a Anthropic cada 5 minutos, igual que `/usage`. Para eso lee el acceso que Claude Code guarda en `~/.claude/.credentials.json`. El acceso solo se envía a Anthropic, nunca se guarda en otro sitio y Lulo no lo renueva: si caducó, espera a que Claude Code lo renueve. Esta consulta no está documentada por Anthropic y puede dejar de funcionar; en ese caso los anillos simplemente no aparecen. Se desactiva con `"account_usage": false` en `widget.json`. Usa el `curl` que trae Windows 10 y 11.
-
-Solo hay datos en los planes Pro y Max. Sin datos, al abrir solo aparecen las fichas. `lulo-hook.exe uninstall` quita también la línea de estado de Lulo.
 
 ### Sobre la lista de tareas
 

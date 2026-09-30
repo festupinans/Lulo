@@ -70,7 +70,7 @@ fn session_file(dir: &Path, session_id: &str) -> Option<PathBuf> {
 
 /// Writes to a temp file and renames it over the target, so the widget never
 /// reads a half-written file.
-pub fn write_atomic(dir: &Path, file: &Path, record: &Value) -> io::Result<()> {
+fn write_atomic(dir: &Path, file: &Path, record: &Value) -> io::Result<()> {
     fs::create_dir_all(dir)?;
     let tmp = file.with_extension(format!("json.{}.tmp", std::process::id()));
     fs::write(&tmp, serde_json::to_vec(record)?)?;
