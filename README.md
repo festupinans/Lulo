@@ -23,19 +23,20 @@ Desde una terminal también funcionan `lulo-hook.exe install`, `lulo-hook.exe un
 
 Haz doble clic en `lulo-widget.exe`. Queda pegado al borde derecho de la pantalla, centrado en vertical, siempre encima y fuera de la barra de tareas.
 
-- **Plegado:** una tira fina de vidrio con un punto de color por sesión. Las que esperan permiso llevan un anillo.
+- **Plegado:** una tira fina de vidrio con el pulpo arriba y un punto de color por sesión. Las que esperan permiso llevan un anillo.
+- **El pulpo:** hace la escena del estado más urgente de todas tus sesiones. Piensa, teclea frente al PC, mira la terminal, busca con lupa, llama a pulpitos ayudantes, espera impaciente, salta al terminar, tiembla con un error y duerme si no hay actividad. En la tarjeta de cada sesión aparece en grande con el estado de esa sesión.
 - **Al pasar el ratón:** se despliega la lista con icono, proyecto, estado, tareas hechas (`2/4`) y hace cuánto fue el último evento. Se vuelve a plegar al sacar el ratón.
 - **Al pasar sobre una sesión:** aparece a la izquierda una tarjeta con el pedido, lo que está haciendo ahora, la lista de tareas (hechas, en curso y pendientes) y los últimos pasos.
 - **Vidrio:** en Windows 10 y 11 usa el desenfoque acrylic del sistema y la tipografía Segoe UI. Si se ve mal en tu equipo, pon `"glass": false` en `widget.json`.
 - **Menú (clic derecho):** "Iniciar con Windows" y "Cerrar Lulo".
 - **Inactiva:** una sesión sin eventos durante 5 minutos pasa a "Inactiva" y baja al final de la lista. "Esperando" nunca pasa a inactiva, porque necesita que respondas.
 - **Sesiones huérfanas:** si cierras una terminal sin `/exit`, Claude Code no envía `SessionEnd`. El widget borra esos archivos tras 12 horas sin eventos.
-- Solo se redibuja cuando cambia un archivo de estado o el ratón está encima, más un refresco cada 15 s para los tiempos.
+- **Consumo:** el pulpo se anima a 12 cuadros por segundo plegado y a 30 desplegado. Con `"animate": false` queda quieto y el widget solo se redibuja cuando cambia un archivo de estado o el ratón está encima, más un refresco cada 15 s para los tiempos.
 
 La configuración está en `%LOCALAPPDATA%\Lulo\widget.json`:
 
 ```json
-{ "glass": true, "inactive_minutes": 5, "forget_hours": 12 }
+{ "glass": true, "animate": true, "inactive_minutes": 5, "forget_hours": 12 }
 ```
 
 ### Sobre la lista de tareas

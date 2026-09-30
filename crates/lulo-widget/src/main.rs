@@ -187,7 +187,12 @@ fn watch(
 ) -> Option<notify::RecommendedWatcher> {
     std::fs::create_dir_all(dir).ok()?;
     let dirty = Arc::clone(dirty);
-    let mut watcher = notify::recommended_watcher(move |_: notify::Result<notify::Event>| {
+    let mut watcher = notify::recommended_watcher(move |event: notify::Result<notify::Event>| {
+        // Reading the files ourselves raises access events on some systems;
+        // reacting to them would reload in a loop.
+        if event.is_ok_and(|e| e.kind.is_access()) {
+            return;
+        }
         dirty.store(true, Ordering::Relaxed);
         ctx.request_repaint();
     })
