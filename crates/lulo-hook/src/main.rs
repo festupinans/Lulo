@@ -9,14 +9,15 @@ mod install;
 mod state;
 mod status;
 
-use std::io::Read;
-use std::path::PathBuf;
+use std::io::{IsTerminal, Read};
+use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
 const USAGE: &str = "\
 lulo-hook: records the live state of each Claude Code session for the Lulo widget.
 
 USAGE:
+    lulo-hook                       Double-click: copy itself to a fixed folder and install the hooks.
     lulo-hook hook                  Handle one hook event (JSON on stdin). Used by Claude Code.
     lulo-hook install [OPTIONS]     Add Lulo's hooks to ~/.claude/settings.json (backs it up first).
     lulo-hook uninstall [OPTIONS]   Remove Lulo's hooks from settings.json.
@@ -30,6 +31,21 @@ OPTIONS:
 fn main() -> ExitCode {
     let args: Vec<String> = std::env::args().skip(1).collect();
     match args.first().map(String::as_str) {
+        // Claude Code always pipes JSON in; a terminal on stdin means a person
+        // double-clicked the .exe or ran it bare.
+        None if std::io::stdin().is_terminal() => {
+            let result = double_click_setup();
+            if let Err(e) = &result {
+                println!("\nNo se pudo instalar: {e}");
+            }
+            println!("\nPulsa Enter para cerrar.");
+            let _ = std::io::stdin().read_line(&mut String::new());
+            if result.is_ok() {
+                ExitCode::SUCCESS
+            } else {
+                ExitCode::FAILURE
+            }
+        }
         None | Some("hook") => {
             run_hook();
             ExitCode::SUCCESS
@@ -68,6 +84,41 @@ fn run_hook() {
     if let Err(e) = status::apply(&dir, &input) {
         // Stderr is only shown in Claude Code's debug output for exit 0.
         eprintln!("lulo-hook: {e}");
+    }
+}
+
+/// Copies this .exe to a fixed folder (so the registered path survives the
+/// download being moved or deleted) and installs the hooks pointing there.
+fn double_click_setup() -> Result<(), String> {
+    println!("Lulo: instalando el hook de estado para Claude Code...\n");
+    let current = std::env::current_exe().map_err(|e| e.to_string())?;
+    let dir = install::default_install_dir().ok_or("no se encontró la carpeta %LOCALAPPDATA%")?;
+    let target = dir.join(current.file_name().ok_or("nombre de archivo inválido")?);
+    if !same_file(&current, &target) {
+        std::fs::create_dir_all(&dir).map_err(|e| format!("{}: {e}", dir.display()))?;
+        std::fs::copy(&current, &target).map_err(|e| format!("{}: {e}", target.display()))?;
+    }
+    let settings =
+        install::default_settings_path().ok_or("no se encontró tu carpeta de usuario")?;
+    let backup = install::install(&settings, &target).map_err(|e| e.to_string())?;
+
+    println!("Listo. Hook copiado en:   {}", target.display());
+    println!("Hooks añadidos en:        {}", settings.display());
+    if let Some(b) = backup {
+        println!("Copia de seguridad en:    {}", b.display());
+    }
+    if let Some(status) = status::status_dir() {
+        println!("Estados de las sesiones:  {}", status.display());
+    }
+    println!("\nReinicia las sesiones de Claude Code abiertas para que empiecen a reportar.");
+    println!("Para desinstalar: \"{}\" uninstall", target.display());
+    Ok(())
+}
+
+fn same_file(a: &Path, b: &Path) -> bool {
+    match (a.canonicalize(), b.canonicalize()) {
+        (Ok(a), Ok(b)) => a == b,
+        _ => false,
     }
 }
 

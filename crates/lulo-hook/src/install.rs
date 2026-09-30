@@ -36,6 +36,23 @@ pub fn default_settings_path() -> Option<PathBuf> {
         .map(|h| PathBuf::from(h).join(".claude").join("settings.json"))
 }
 
+/// Where a double-click copies the hook: `%LOCALAPPDATA%\Lulo` on Windows,
+/// `~/.local/share/lulo` elsewhere. `LULO_INSTALL_DIR` overrides it.
+pub fn default_install_dir() -> Option<PathBuf> {
+    let env = |k: &str| {
+        std::env::var_os(k)
+            .filter(|v| !v.is_empty())
+            .map(PathBuf::from)
+    };
+    if let Some(dir) = env("LULO_INSTALL_DIR") {
+        return Some(dir);
+    }
+    if cfg!(windows) {
+        return env("LOCALAPPDATA").map(|d| d.join("Lulo"));
+    }
+    env("HOME").map(|h| h.join(".local").join("share").join("lulo"))
+}
+
 /// Installs the hooks for `exe`. Returns the backup path, if a settings file
 /// already existed.
 pub fn install(settings_path: &Path, exe: &Path) -> io::Result<Option<PathBuf>> {

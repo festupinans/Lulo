@@ -14,17 +14,10 @@ Funciona con [hooks de Claude Code](https://code.claude.com/docs/en/hooks): cada
 ## Instalar el hook
 
 1. Descarga `lulo-hook.exe` (artefacto `lulo-hook-windows-x64` del último build de CI) o compílalo con `cargo build --release -p lulo-hook`.
-2. Déjalo en una carpeta fija, por ejemplo `%LOCALAPPDATA%\Lulo\lulo-hook.exe`. La ruta queda registrada en `settings.json`, así que no lo muevas después.
-3. Ejecuta desde esa carpeta:
+2. Haz doble clic en él. Se copia a `%LOCALAPPDATA%\Lulo\lulo-hook.exe` y añade los hooks a `~/.claude/settings.json` sin tocar el resto del archivo, guardando antes una copia (`settings.json.lulo-backup-<fecha>`). Puedes repetirlo cuando quieras: nunca duplica entradas.
+3. Reinicia las sesiones de Claude Code abiertas para que carguen los hooks.
 
-   ```powershell
-   .\lulo-hook.exe install
-   ```
-
-   Añade los hooks a `~/.claude/settings.json` sin tocar el resto del archivo y guarda antes una copia (`settings.json.lulo-backup-<fecha>`). Puedes ejecutarlo varias veces: nunca duplica entradas.
-4. Reinicia las sesiones de Claude Code abiertas para que carguen los hooks.
-
-Para quitarlo: `.\lulo-hook.exe uninstall`. Para ver dónde escribe: `.\lulo-hook.exe status-dir`.
+Desde una terminal también funcionan `lulo-hook.exe install`, `lulo-hook.exe uninstall` y `lulo-hook.exe status-dir` (carpeta donde escribe los estados).
 
 ## Archivo de estado
 
