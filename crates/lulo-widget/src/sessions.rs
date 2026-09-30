@@ -15,19 +15,8 @@ pub struct Session {
     pub ts: u64,
     /// The last prompt, clipped by the hook.
     pub prompt: Option<String>,
-    /// Unix seconds when that prompt was sent.
-    pub started: Option<u64>,
-    /// Actions taken for the current prompt, oldest first.
-    pub steps: Vec<Step>,
     /// Claude's task list, when it keeps one.
     pub tasks: Vec<Task>,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Step {
-    pub state: String,
-    pub detail: Option<String>,
-    pub ts: u64,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -50,16 +39,6 @@ impl Session {
             detail: s("detail").filter(|d| !d.is_empty()),
             ts: v.get("ts").and_then(Value::as_u64).unwrap_or(0),
             prompt: s("prompt").filter(|p| !p.is_empty()),
-            started: v.get("started").and_then(Value::as_u64),
-            steps: array(&v, "steps")
-                .filter_map(|st| {
-                    Some(Step {
-                        state: st.get("state")?.as_str()?.to_string(),
-                        detail: st.get("detail").and_then(Value::as_str).map(str::to_string),
-                        ts: st.get("ts").and_then(Value::as_u64).unwrap_or(0),
-                    })
-                })
-                .collect(),
             tasks: array(&v, "tasks")
                 .filter_map(|t| {
                     Some(Task {
@@ -150,6 +129,11 @@ pub fn load(dir: &Path, now: u64, forget_secs: u64) -> Vec<Session> {
         .flatten()
         .map(|e| e.path())
         .filter(|p| p.extension().is_some_and(|x| x == "json"))
+        // `_usage.json` and any other non-session file the hook keeps here.
+        .filter(|p| {
+            !p.file_name()
+                .is_some_and(|n| n.to_string_lossy().starts_with('_'))
+        })
         .filter_map(|p| {
             let session = Session::parse(&fs::read_to_string(&p).ok()?)?;
             if now.saturating_sub(session.ts) >= forget_secs {
@@ -206,9 +190,6 @@ mod tests {
         )
         .unwrap();
         assert_eq!(s.prompt.as_deref(), Some("Arregla el login"));
-        assert_eq!(s.started, Some(5));
-        assert_eq!(s.steps.len(), 2);
-        assert_eq!(s.steps[1].detail, None);
         assert_eq!(s.tasks[2].status, "pending");
         assert_eq!(s.task_counts(), (1, 3));
     }
@@ -234,6 +215,11 @@ mod tests {
         )
         .unwrap();
         fs::write(dir.join("d.json"), "half-writ").unwrap();
+        fs::write(
+            dir.join("_usage.json"),
+            r#"{"session_id":"u","state":"done","ts":1}"#,
+        )
+        .unwrap();
 
         let names: Vec<_> = load(&dir, 10, 100).into_iter().map(|s| s.project).collect();
         assert_eq!(names, ["New", "Old"]);
@@ -246,6 +232,7 @@ mod tests {
             .collect();
         assert_eq!(names, ["New"]);
         assert!(!dir.join("a.json").exists());
+        assert!(dir.join("_usage.json").exists());
         fs::remove_dir_all(&dir).unwrap();
 
         assert!(load(Path::new("/definitely/not/here"), 0, 1).is_empty());

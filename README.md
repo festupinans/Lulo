@@ -17,19 +17,20 @@ Funciona con [hooks de Claude Code](https://code.claude.com/docs/en/hooks): cada
 2. Haz doble clic en `lulo-hook.exe`. Se copia a `%LOCALAPPDATA%\Lulo\lulo-hook.exe` y añade los hooks a `~/.claude/settings.json` sin tocar el resto del archivo, guardando antes una copia (`settings.json.lulo-backup-<fecha>`). Puedes repetirlo cuando quieras: nunca duplica entradas. Si `lulo-widget.exe` está en la misma carpeta, también lo copia y lo abre.
 3. Reinicia las sesiones de Claude Code abiertas para que carguen los hooks.
 
-Desde una terminal también funcionan `lulo-hook.exe install`, `lulo-hook.exe uninstall` y `lulo-hook.exe status-dir` (carpeta donde escribe los estados).
+Desde una terminal también funcionan `lulo-hook.exe install`, `lulo-hook.exe uninstall` y `lulo-hook.exe status-dir` (carpeta donde escribe los estados). La instalación también configura la línea de estado que alimenta los anillos de uso.
 
 ## Abrir el widget
 
-Haz doble clic en `lulo-widget.exe`. Queda pegado al borde derecho de la pantalla, centrado en vertical, siempre encima y fuera de la barra de tareas.
+Haz doble clic en `lulo-widget.exe`. Aparece como una isla de vidrio arriba en el centro de la pantalla, siempre encima y fuera de la barra de tareas.
 
-- **Plegado:** una tira fina de vidrio con el pulpo arriba y un punto de color por sesión. Las que esperan permiso llevan un anillo.
-- **El pulpo:** hace la escena del estado más urgente de todas tus sesiones. Piensa, teclea frente al PC, mira la terminal, busca con lupa, llama a pulpitos ayudantes, espera impaciente, salta al terminar, tiembla con un error y duerme si no hay actividad. En la tarjeta de cada sesión aparece en grande con el estado de esa sesión.
-- **Al pasar el ratón:** se despliega la lista con icono, proyecto, estado, tareas hechas (`2/4`) y hace cuánto fue el último evento. Se vuelve a plegar al sacar el ratón.
-- **Al pasar sobre una sesión:** aparece a la izquierda una tarjeta con el pedido, lo que está haciendo ahora, la lista de tareas (hechas, en curso y pendientes) y los últimos pasos.
+- **Plegada:** una píldora con el pulpo, una frase y un punto de color por sesión. La frase habla de lo que más te necesita: «api-server te espera», «docs tuvo un error», lo que hace la sesión más reciente («Lulo edita style.rs · 2 más»), «Todo listo» o «Sin actividad».
+- **El pulpo:** hace la escena de ese estado. Piensa, teclea frente al PC, mira la terminal, busca con lupa, llama a pulpitos ayudantes, espera impaciente, salta al terminar, tiembla con un error y duerme si no hay actividad.
+- **Al pasar el ratón:** la isla se abre con una ficha por sesión (pulpo, proyecto, estado y barra de tareas hechas) y debajo un resumen («3 trabajando · 1 te espera · 1 terminó»). Se vuelve a plegar al sacar el ratón.
+- **Al pasar sobre una ficha:** debajo aparece qué hace ahora y sus tareas como pasos (hechas, la actual resaltada y las que faltan). Si espera permiso, dice para qué. Si no usa tareas, muestra el pedido.
+- **Anillos de uso:** con la isla abierta, a la izquierda, dos anillos alrededor del pulpo. El de color es el uso que te queda en la ventana de 5 horas de tu plan (verde, ámbar desde la mitad, rojo y latiendo al final). El blanco, más fino, es el tiempo que falta para que se restablezca. Ver [Sobre los anillos de uso](#sobre-los-anillos-de-uso).
 - **Vidrio:** en Windows 10 y 11 usa el desenfoque acrylic del sistema y la tipografía Segoe UI. Si se ve mal en tu equipo, pon `"glass": false` en `widget.json`.
 - **Menú (clic derecho):** "Iniciar con Windows" y "Cerrar Lulo".
-- **Inactiva:** una sesión sin eventos durante 5 minutos pasa a "Inactiva" y baja al final de la lista. "Esperando" nunca pasa a inactiva, porque necesita que respondas.
+- **Inactiva:** una sesión sin eventos durante 5 minutos pasa a "Inactiva" y baja al final. "Esperando" nunca pasa a inactiva, porque necesita que respondas.
 - **Sesiones huérfanas:** si cierras una terminal sin `/exit`, Claude Code no envía `SessionEnd`. El widget borra esos archivos tras 12 horas sin eventos.
 - **Consumo:** el pulpo se anima a 12 cuadros por segundo plegado y a 30 desplegado. Con `"animate": false` queda quieto y el widget solo se redibuja cuando cambia un archivo de estado o el ratón está encima, más un refresco cada 15 s para los tiempos.
 
@@ -39,9 +40,17 @@ La configuración está en `%LOCALAPPDATA%\Lulo\widget.json`:
 { "glass": true, "animate": true, "inactive_minutes": 5, "forget_hours": 12 }
 ```
 
+### Sobre los anillos de uso
+
+Los hooks de Claude Code no traen el uso del plan; solo lo trae la línea de estado (status line). Por eso la instalación también pone `lulo-hook.exe statusline` como línea de estado en `settings.json`: guarda el uso en `claude-status\_usage.json` para el widget y muestra en la terminal una línea como `Opus · Lulo · 5 h: 34 % usado, reinicia en 2 h 10 min`.
+
+- Si ya tenías una línea de estado propia, Lulo no la toca y te avisa: los anillos no aparecerán hasta que la quites y vuelvas a instalar.
+- Claude Code solo da estos datos en los planes Pro y Max (no con clave de API), y a partir de la primera respuesta de cada sesión. Sin datos, la isla muestra solo las fichas.
+- `lulo-hook.exe uninstall` quita también la línea de estado de Lulo.
+
 ### Sobre la lista de tareas
 
-La lista sale de las herramientas de tareas de Claude Code (`TaskCreate`/`TaskUpdate`, o `TodoWrite` en versiones antiguas). En los modelos más nuevos Claude Code no las activa por defecto, así que la tarjeta muestra el pedido y los pasos pero no tareas. Para activarlas, arranca Claude Code con la variable de entorno `CLAUDE_CODE_ENABLE_TODO_TOOLS=1` (por ejemplo, `setx CLAUDE_CODE_ENABLE_TODO_TOOLS 1` en Windows y reinicia la terminal).
+La lista sale de las herramientas de tareas de Claude Code (`TaskCreate`/`TaskUpdate`, o `TodoWrite` en versiones antiguas). En los modelos más nuevos Claude Code no las activa por defecto, así que la ficha muestra el pedido en lugar de las tareas. Para activarlas, arranca Claude Code con la variable de entorno `CLAUDE_CODE_ENABLE_TODO_TOOLS=1` (por ejemplo, `setx CLAUDE_CODE_ENABLE_TODO_TOOLS 1` en Windows y reinicia la terminal).
 
 ## Archivo de estado
 

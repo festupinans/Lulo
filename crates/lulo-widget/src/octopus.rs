@@ -86,22 +86,6 @@ pub fn paint(painter: &Painter, rect: Rect, state: &str, t: f64) {
     }
 }
 
-/// The state the collapsed strip shows: the one that most needs the user.
-pub fn most_urgent<'a>(states: impl IntoIterator<Item = &'a str>) -> &'a str {
-    let rank = |s: &str| match s {
-        "waiting" => 0,
-        "error" => 1,
-        "editing" | "bash" | "reading" | "subagent" | "thinking" | "tool" => 2,
-        "done" => 3,
-        "ready" => 4,
-        _ => 5,
-    };
-    states
-        .into_iter()
-        .min_by_key(|s| rank(s))
-        .unwrap_or("inactive")
-}
-
 // ---- Scenes ----
 
 /// Sways side to side looking up while idea dots pop up one after another.
@@ -753,14 +737,6 @@ mod tests {
         assert_eq!(keys(1., &k), 0.);
         assert!((phase(5.5, 2., 0.) - 0.75).abs() < 1e-6);
         assert!((phase(0.1, 1., 0.3) - 0.8).abs() < 1e-6);
-    }
-
-    #[test]
-    fn picks_the_state_that_needs_the_user() {
-        assert_eq!(most_urgent(["done", "waiting", "editing"]), "waiting");
-        assert_eq!(most_urgent(["inactive", "bash"]), "bash");
-        assert_eq!(most_urgent(["inactive", "done"]), "done");
-        assert_eq!(most_urgent([]), "inactive");
     }
 
     #[test]

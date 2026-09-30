@@ -55,12 +55,24 @@ pub fn default_install_dir() -> Option<PathBuf> {
     env("HOME").map(|h| h.join(".local").join("share").join("lulo"))
 }
 
-/// Installs the hooks for `exe`. Returns the backup path, if a settings file
-/// already existed.
-pub fn install(settings_path: &Path, exe: &Path) -> io::Result<Option<PathBuf>> {
+pub struct Installed {
+    /// The previous settings file, if one existed.
+    pub backup: Option<PathBuf>,
+    /// Whether Lulo's status line is set. False when the user has their own.
+    pub status_line: bool,
+}
+
+/// Installs the hooks and, unless the user has their own, the status line.
+pub fn install(settings_path: &Path, exe: &Path) -> io::Result<Installed> {
     let mut settings = read_settings(settings_path)?;
-    add_hooks(&mut settings, &exe.to_string_lossy())?;
-    save(settings_path, &settings)
+    let exe = exe.to_string_lossy();
+    add_hooks(&mut settings, &exe)?;
+    let status_line = add_status_line(&mut settings, &exe);
+    let backup = save(settings_path, &settings)?;
+    Ok(Installed {
+        backup,
+        status_line,
+    })
 }
 
 pub fn uninstall(settings_path: &Path) -> io::Result<Option<PathBuf>> {
@@ -68,7 +80,8 @@ pub fn uninstall(settings_path: &Path) -> io::Result<Option<PathBuf>> {
         return Ok(None);
     }
     let mut settings = read_settings(settings_path)?;
-    if !remove_hooks(&mut settings) {
+    let hooks = remove_hooks(&mut settings);
+    if !remove_status_line(&mut settings) && !hooks {
         return Ok(None);
     }
     save(settings_path, &settings)
@@ -177,6 +190,53 @@ pub fn remove_hooks(settings: &mut Value) -> bool {
     changed
 }
 
+/// Sets `statusLine` to run `exe statusline`, unless the user already has a
+/// status line of their own. Returns whether Lulo's is in place.
+pub fn add_status_line(settings: &mut Value, exe: &str) -> bool {
+    let Some(root) = settings.as_object_mut() else {
+        return false;
+    };
+    if root
+        .get("statusLine")
+        .is_some_and(|s| !is_lulo_status_line(s))
+    {
+        return false;
+    }
+    // The status line only has a shell form. Forward slashes and quotes work
+    // the same in Git Bash, cmd and sh.
+    let command = format!("\"{}\" statusline", exe.replace('\\', "/"));
+    root.insert(
+        "statusLine".to_string(),
+        json!({ "type": "command", "command": command, "padding": 0 }),
+    );
+    true
+}
+
+pub fn remove_status_line(settings: &mut Value) -> bool {
+    let Some(root) = settings.as_object_mut() else {
+        return false;
+    };
+    if root.get("statusLine").is_some_and(is_lulo_status_line) {
+        root.remove("statusLine");
+        return true;
+    }
+    false
+}
+
+fn is_lulo_status_line(status_line: &Value) -> bool {
+    let Some(command) = status_line.get("command").and_then(Value::as_str) else {
+        return false;
+    };
+    let exe = command
+        .trim()
+        .strip_suffix("statusline")
+        .unwrap_or("")
+        .trim()
+        .trim_matches('"');
+    let name = crate::state::file_name(exe).to_ascii_lowercase();
+    name == "lulo-hook" || name == "lulo-hook.exe"
+}
+
 fn is_lulo_handler(handler: &Value) -> bool {
     let Some(command) = handler.get("command").and_then(Value::as_str) else {
         return false;
@@ -261,6 +321,33 @@ mod tests {
         let mut s = json!({ "hooks": { "Stop": [] } });
         assert!(!remove_hooks(&mut s));
         assert_eq!(s, json!({ "hooks": { "Stop": [] } }));
+    }
+
+    #[test]
+    fn status_line_is_added_and_removed() {
+        let mut s = json!({ "model": "opus" });
+        assert!(add_status_line(&mut s, EXE));
+        assert_eq!(
+            s["statusLine"]["command"],
+            "\"C:/Users/me/AppData/Local/Lulo/lulo-hook.exe\" statusline"
+        );
+        // Reinstalling from a new place replaces Lulo's own line.
+        assert!(add_status_line(&mut s, "/opt/lulo/lulo-hook"));
+        assert_eq!(
+            s["statusLine"]["command"],
+            "\"/opt/lulo/lulo-hook\" statusline"
+        );
+        assert!(remove_status_line(&mut s));
+        assert_eq!(s, json!({ "model": "opus" }));
+    }
+
+    #[test]
+    fn users_own_status_line_is_kept() {
+        let own = json!({ "type": "command", "command": "~/.claude/statusline.sh" });
+        let mut s = json!({ "statusLine": own.clone() });
+        assert!(!add_status_line(&mut s, EXE));
+        assert!(!remove_status_line(&mut s));
+        assert_eq!(s["statusLine"], own);
     }
 
     #[test]
