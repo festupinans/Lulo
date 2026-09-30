@@ -30,21 +30,33 @@ impl Session {
         })
     }
 
-    /// Spanish label for the widget.
-    pub fn label(&self) -> &'static str {
-        match self.state.as_str() {
-            "ready" => "Lista",
-            "thinking" => "Pensando",
-            "editing" => "Editando",
-            "bash" => "Bash",
-            "reading" => "Leyendo",
-            "subagent" => "Subagente",
-            "tool" => "Herramienta",
-            "waiting" => "Esperando",
-            "done" => "Terminó",
-            "error" => "Error",
-            _ => "Desconocido",
+    /// The state to show: any state except "waiting" turns "inactive" after
+    /// `inactive_secs` without hook events. Waiting stays visible because it
+    /// needs the user.
+    pub fn shown_state(&self, now: u64, inactive_secs: u64) -> &str {
+        if self.state != "waiting" && now.saturating_sub(self.ts) >= inactive_secs {
+            "inactive"
+        } else {
+            &self.state
         }
+    }
+}
+
+/// Spanish label for a state.
+pub fn label(state: &str) -> &'static str {
+    match state {
+        "ready" => "Lista",
+        "thinking" => "Pensando",
+        "editing" => "Editando",
+        "bash" => "Bash",
+        "reading" => "Leyendo",
+        "subagent" => "Subagente",
+        "tool" => "Herramienta",
+        "waiting" => "Esperando",
+        "done" => "Terminó",
+        "error" => "Error",
+        "inactive" => "Inactiva",
+        _ => "Desconocido",
     }
 }
 
@@ -68,7 +80,10 @@ pub fn status_dir() -> Option<PathBuf> {
 
 /// Every readable session in `dir`, most recently active first. Unreadable
 /// or half-written files are skipped; the next change event retries them.
-pub fn load(dir: &Path) -> Vec<Session> {
+///
+/// Sessions silent for `forget_secs` are deleted: a terminal closed without
+/// `/exit` never sends SessionEnd, so its file would otherwise stay forever.
+pub fn load(dir: &Path, now: u64, forget_secs: u64) -> Vec<Session> {
     let Ok(entries) = fs::read_dir(dir) else {
         return Vec::new();
     };
@@ -76,8 +91,14 @@ pub fn load(dir: &Path) -> Vec<Session> {
         .flatten()
         .map(|e| e.path())
         .filter(|p| p.extension().is_some_and(|x| x == "json"))
-        .filter_map(|p| fs::read_to_string(p).ok())
-        .filter_map(|t| Session::parse(&t))
+        .filter_map(|p| {
+            let session = Session::parse(&fs::read_to_string(&p).ok()?)?;
+            if now.saturating_sub(session.ts) >= forget_secs {
+                let _ = fs::remove_file(&p);
+                return None;
+            }
+            Some(session)
+        })
         .collect();
     sessions.sort_by(|a, b| b.ts.cmp(&a.ts).then_with(|| a.project.cmp(&b.project)));
     sessions
@@ -105,7 +126,7 @@ mod tests {
         )
         .unwrap();
         assert_eq!(s.project, "Lulo");
-        assert_eq!(s.label(), "Editando");
+        assert_eq!(label(&s.state), "Editando");
         assert_eq!(s.detail.as_deref(), Some("main.rs"));
         assert_eq!(s.ts, 100);
 
@@ -139,11 +160,32 @@ mod tests {
         .unwrap();
         fs::write(dir.join("d.json"), "half-writ").unwrap();
 
-        let names: Vec<_> = load(&dir).into_iter().map(|s| s.project).collect();
+        let names: Vec<_> = load(&dir, 10, 100).into_iter().map(|s| s.project).collect();
         assert_eq!(names, ["New", "Old"]);
+        assert!(dir.join("a.json").exists());
+
+        // At now=101, "Old" (ts 1) is 100 s silent: forgotten and deleted.
+        let names: Vec<_> = load(&dir, 101, 100)
+            .into_iter()
+            .map(|s| s.project)
+            .collect();
+        assert_eq!(names, ["New"]);
+        assert!(!dir.join("a.json").exists());
         fs::remove_dir_all(&dir).unwrap();
 
-        assert!(load(Path::new("/definitely/not/here")).is_empty());
+        assert!(load(Path::new("/definitely/not/here"), 0, 1).is_empty());
+    }
+
+    #[test]
+    fn silent_sessions_turn_inactive_except_waiting() {
+        let mut s = Session::parse(r#"{"session_id":"a","state":"thinking","ts":1000}"#).unwrap();
+        assert_eq!(s.shown_state(1299, 300), "thinking");
+        assert_eq!(s.shown_state(1300, 300), "inactive");
+        s.state = "done".into();
+        assert_eq!(s.shown_state(5000, 300), "inactive");
+        s.state = "waiting".into();
+        assert_eq!(s.shown_state(5000, 300), "waiting");
+        assert_eq!(label("inactive"), "Inactiva");
     }
 
     #[test]

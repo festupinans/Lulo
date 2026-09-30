@@ -110,6 +110,24 @@ fn double_click_setup() -> Result<(), String> {
     if let Some(status) = status::status_dir() {
         println!("Estados de las sesiones:  {}", status.display());
     }
+    // Bring the widget along when it was downloaded next to the hook, and open it.
+    let widget_name = format!("lulo-widget{}", std::env::consts::EXE_SUFFIX);
+    let widget_src = current.with_file_name(&widget_name);
+    let widget = dir.join(&widget_name);
+    if widget_src.exists() && !same_file(&widget_src, &widget) {
+        if let Err(e) = std::fs::copy(&widget_src, &widget) {
+            println!(
+                "Aviso: no se pudo copiar el widget ({e}). Si está abierto, ciérralo y repite."
+            );
+        }
+    }
+    if widget.exists() {
+        println!("Widget:                   {}", widget.display());
+        if std::process::Command::new(&widget).spawn().is_ok() {
+            println!("\nWidget abierto. Clic derecho sobre él para \"Iniciar con Windows\".");
+        }
+    }
+
     println!("\nReinicia las sesiones de Claude Code abiertas para que empiecen a reportar.");
     println!("Para desinstalar: \"{}\" uninstall", target.display());
     Ok(())

@@ -9,12 +9,12 @@ Funciona con [hooks de Claude Code](https://code.claude.com/docs/en/hooks): cada
 - [x] Fase 1: binario del hook e instalación en `settings.json`
 - [x] Fase 2: widget básico que lista las sesiones
 - [x] Fase 3: colores, iconos, posición y arrastre
-- [ ] Fase 4: sesiones inactivas y pulido
+- [x] Fase 4: sesiones inactivas y pulido
 
 ## Instalar el hook
 
 1. Descarga el artefacto `lulo-windows-x64` del último build de CI (trae `lulo-hook.exe` y `lulo-widget.exe`) o compílalos con `cargo build --release`.
-2. Haz doble clic en él. Se copia a `%LOCALAPPDATA%\Lulo\lulo-hook.exe` y añade los hooks a `~/.claude/settings.json` sin tocar el resto del archivo, guardando antes una copia (`settings.json.lulo-backup-<fecha>`). Puedes repetirlo cuando quieras: nunca duplica entradas.
+2. Haz doble clic en `lulo-hook.exe`. Se copia a `%LOCALAPPDATA%\Lulo\lulo-hook.exe` y añade los hooks a `~/.claude/settings.json` sin tocar el resto del archivo, guardando antes una copia (`settings.json.lulo-backup-<fecha>`). Puedes repetirlo cuando quieras: nunca duplica entradas. Si `lulo-widget.exe` está en la misma carpeta, también lo copia y lo abre.
 3. Reinicia las sesiones de Claude Code abiertas para que carguen los hooks.
 
 Desde una terminal también funcionan `lulo-hook.exe install`, `lulo-hook.exe uninstall` y `lulo-hook.exe status-dir` (carpeta donde escribe los estados).
@@ -23,9 +23,17 @@ Desde una terminal también funcionan `lulo-hook.exe install`, `lulo-hook.exe un
 
 Haz doble clic en `lulo-widget.exe`. Aparece una ventana pequeña, sin bordes, semitransparente y siempre encima, fuera de la barra de tareas. Tiene una fila por sesión con icono y color según el estado, el proyecto, el detalle (archivo, comando…) y hace cuánto fue el último evento. La altura se ajusta al número de sesiones.
 
-- **Mover:** arrástrala desde cualquier punto. La posición se guarda en `%LOCALAPPDATA%\Lulo\widget.json` y se recupera al abrirla.
-- **Cerrar:** clic derecho y "Cerrar Lulo".
+- **Mover:** arrástrala desde cualquier punto. La posición se recuerda.
+- **Menú (clic derecho):** "Iniciar con Windows" y "Cerrar Lulo".
+- **Inactiva:** una sesión sin eventos durante 5 minutos pasa a "Inactiva" y baja al final de la lista. "Esperando" nunca pasa a inactiva, porque necesita que respondas.
+- **Sesiones huérfanas:** si cierras una terminal sin `/exit`, Claude Code no envía `SessionEnd`. El widget borra esos archivos tras 12 horas sin eventos.
 - Solo se redibuja cuando cambia un archivo de estado, más un refresco cada 15 s para los tiempos.
+
+Los dos umbrales se cambian en `%LOCALAPPDATA%\Lulo\widget.json`:
+
+```json
+{ "inactive_minutes": 5, "forget_hours": 12, "x": 1500, "y": 40 }
+```
 
 ## Archivo de estado
 

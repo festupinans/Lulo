@@ -7,22 +7,26 @@
 // No console window behind the widget on Windows.
 #![cfg_attr(windows, windows_subsystem = "windows")]
 
-mod position;
+mod autostart;
 mod sessions;
+mod settings;
 mod style;
 
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use eframe::egui::{self, Align, Color32, CornerRadius, Layout, RichText, Sense};
 use notify::{RecursiveMode, Watcher};
 
 use sessions::Session;
+use settings::Settings;
 
-/// Refresh for the "5 min" labels when no file changes.
+/// Refresh for the "5 min" labels and the inactive state when no file changes.
 const TICK: Duration = Duration::from_secs(15);
+/// Re-reads the folder even without change events, to forget dead sessions.
+const RELOAD: Duration = Duration::from_secs(60);
 const WIDTH: f32 = 320.0;
 const MARGIN: f32 = 8.0;
 const PROJECT_WIDTH: f32 = 96.0;
@@ -38,14 +42,21 @@ fn main() -> eframe::Result {
         .with_taskbar(false)
         .with_active(false)
         .with_resizable(false);
-    if let Some(pos) = position::load() {
+    let settings = Settings::load();
+    // Writes the defaults on first run so the thresholds are there to edit.
+    settings.save();
+    if let Some(pos) = settings.position {
         viewport = viewport.with_position(pos);
     }
     let options = eframe::NativeOptions {
         viewport,
         ..Default::default()
     };
-    eframe::run_native("Lulo", options, Box::new(|cc| Ok(Box::new(App::new(cc)))))
+    eframe::run_native(
+        "Lulo",
+        options,
+        Box::new(|cc| Ok(Box::new(App::new(cc, settings)))),
+    )
 }
 
 struct App {
@@ -55,11 +66,13 @@ struct App {
     dirty: Arc<AtomicBool>,
     /// Kept alive for as long as the app runs.
     _watcher: Option<notify::RecommendedWatcher>,
-    saved_pos: Option<egui::Pos2>,
+    last_load: Option<Instant>,
+    settings: Settings,
+    autostart: bool,
 }
 
 impl App {
-    fn new(cc: &eframe::CreationContext<'_>) -> Self {
+    fn new(cc: &eframe::CreationContext<'_>, settings: Settings) -> Self {
         let dir = sessions::status_dir();
         let dirty = Arc::new(AtomicBool::new(true));
         let watcher = dir
@@ -70,7 +83,9 @@ impl App {
             sessions: Vec::new(),
             dirty,
             _watcher: watcher,
-            saved_pos: position::load().map(egui::Pos2::from),
+            last_load: None,
+            settings,
+            autostart: autostart::is_enabled(),
         }
     }
 
@@ -78,9 +93,10 @@ impl App {
     fn remember_position(&mut self, ctx: &egui::Context) {
         let (rect, pointer_down) = ctx.input(|i| (i.viewport().outer_rect, i.pointer.any_down()));
         let Some(rect) = rect else { return };
-        if !pointer_down && self.saved_pos != Some(rect.min) {
-            position::save([rect.min.x, rect.min.y]);
-            self.saved_pos = Some(rect.min);
+        let pos = Some([rect.min.x, rect.min.y]);
+        if !pointer_down && self.settings.position != pos {
+            self.settings.position = pos;
+            self.settings.save();
         }
     }
 }
@@ -108,14 +124,24 @@ impl eframe::App for App {
     }
 
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
-        if self.dirty.swap(false, Ordering::Relaxed) {
-            if let Some(dir) = &self.dir {
-                self.sessions = sessions::load(dir);
-            }
-        }
         let now = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .map_or(0, |d| d.as_secs());
+        let stale = self.last_load.is_none_or(|t| t.elapsed() >= RELOAD);
+        if self.dirty.swap(false, Ordering::Relaxed) || stale {
+            if let Some(dir) = &self.dir {
+                self.sessions = sessions::load(dir, now, self.settings.forget_secs());
+            }
+            self.last_load = Some(Instant::now());
+        }
+        // Rows that need attention stay on top; inactive ones sink.
+        let inactive_secs = self.settings.inactive_secs();
+        let mut rows: Vec<(&Session, &str)> = self
+            .sessions
+            .iter()
+            .map(|s| (s, s.shown_state(now, inactive_secs)))
+            .collect();
+        rows.sort_by_key(|(_, state)| *state == "inactive");
         let ctx = ui.ctx().clone();
 
         let frame = egui::Frame::new()
@@ -123,24 +149,32 @@ impl eframe::App for App {
             .corner_radius(CornerRadius::same(8))
             .inner_margin(MARGIN);
         let panel = egui::CentralPanel::default().frame(frame).show(ui, |ui| {
-            // The whole window is a drag handle, and right-click closes it.
+            // The whole window is a drag handle; right-click opens the menu.
             let background =
                 ui.interact(ui.max_rect(), ui.id().with("drag"), Sense::click_and_drag());
             if background.drag_started() {
                 ctx.send_viewport_cmd(egui::ViewportCommand::StartDrag);
             }
             background.context_menu(|ui| {
+                if autostart::SUPPORTED
+                    && ui
+                        .checkbox(&mut self.autostart, "Iniciar con Windows")
+                        .changed()
+                {
+                    autostart::set(self.autostart);
+                    self.autostart = autostart::is_enabled();
+                }
                 if ui.button("Cerrar Lulo").clicked() {
                     ctx.send_viewport_cmd(egui::ViewportCommand::Close);
                 }
             });
 
             let top = ui.cursor().top();
-            if self.sessions.is_empty() {
+            if rows.is_empty() {
                 ui.label(RichText::new("Sin sesiones de Claude Code").color(Color32::GRAY));
             }
-            for s in &self.sessions {
-                session_row(ui, s, now);
+            for (s, state) in &rows {
+                session_row(ui, s, state, now);
             }
             ui.cursor().top() - top
         });
@@ -157,8 +191,8 @@ impl eframe::App for App {
     }
 }
 
-fn session_row(ui: &mut egui::Ui, s: &Session, now: u64) {
-    let look = style::look(&s.state);
+fn session_row(ui: &mut egui::Ui, s: &Session, state: &str, now: u64) {
+    let look = style::look(state);
     let row = ui.horizontal(|ui| {
         ui.spacing_mut().item_spacing.x = 6.0;
         ui.add_sized(
@@ -188,7 +222,7 @@ fn session_row(ui: &mut egui::Ui, s: &Session, now: u64) {
                     .color(Color32::from_gray(120)),
             );
             let mut text = egui::text::LayoutJob::default();
-            text.append(s.label(), 0.0, text_format(ui, look.color));
+            text.append(sessions::label(state), 0.0, text_format(ui, look.color));
             if let Some(detail) = &s.detail {
                 text.append(
                     &format!("  {detail}"),
