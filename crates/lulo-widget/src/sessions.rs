@@ -151,6 +151,20 @@ pub fn load(dir: &Path, now: u64, forget_secs: u64) -> Vec<Session> {
     sessions
 }
 
+/// Deletes a session's file so it leaves the list. If the session gets
+/// another hook event, the hook writes it again and it comes back.
+pub fn forget(dir: &Path, id: &str) {
+    // Same rule as the hook: a crafted id can't reach outside the folder.
+    let valid = !id.is_empty()
+        && id.len() <= 128
+        && id
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_');
+    if valid {
+        let _ = fs::remove_file(dir.join(format!("{id}.json")));
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -241,5 +255,22 @@ mod tests {
         s.state = "waiting".into();
         assert_eq!(s.shown_state(5000, 300), "waiting");
         assert_eq!(label("inactive"), "Inactiva");
+    }
+
+    #[test]
+    fn forgets_only_the_session_asked() {
+        let dir = std::env::temp_dir().join(format!("lulo-forget-test-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(dir.join("sub")).unwrap();
+        for f in ["a.json", "b.json", "sub/c.json"] {
+            fs::write(dir.join(f), "{}").unwrap();
+        }
+        forget(&dir, "a");
+        forget(&dir, "../b");
+        forget(&dir, "sub/c");
+        assert!(!dir.join("a.json").exists());
+        assert!(dir.join("b.json").exists());
+        assert!(dir.join("sub/c.json").exists());
+        fs::remove_dir_all(&dir).unwrap();
     }
 }

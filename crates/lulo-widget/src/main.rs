@@ -166,6 +166,21 @@ impl App {
         }
     }
 
+    /// The right-click menu: autostart and close.
+    fn menu(&mut self, ui: &mut egui::Ui) {
+        if autostart::SUPPORTED
+            && ui
+                .checkbox(&mut self.autostart, "Iniciar con Windows")
+                .changed()
+        {
+            autostart::set(self.autostart);
+            self.autostart = autostart::is_enabled();
+        }
+        if ui.button("Cerrar Lulo").clicked() {
+            ui.ctx().send_viewport_cmd(egui::ViewportCommand::Close);
+        }
+    }
+
     /// Next frame for the animation, or just the slow tick when it is off.
     fn schedule_repaint(&self, ctx: &egui::Context, frame: Duration) {
         ctx.request_repaint_after(if self.settings.animate { frame } else { TICK });
@@ -240,19 +255,7 @@ impl eframe::App for App {
         let full = ui.max_rect();
         // Right-click anywhere: autostart and close.
         let background = ui.interact(full, ui.id().with("bg"), Sense::click());
-        background.context_menu(|ui| {
-            if autostart::SUPPORTED
-                && ui
-                    .checkbox(&mut self.autostart, "Iniciar con Windows")
-                    .changed()
-            {
-                autostart::set(self.autostart);
-                self.autostart = autostart::is_enabled();
-            }
-            if ui.button("Cerrar Lulo").clicked() {
-                ctx.send_viewport_cmd(egui::ViewportCommand::Close);
-            }
-        });
+        background.context_menu(|ui| self.menu(ui));
 
         let state = island::focus(&rows);
         let active: Vec<&str> = rows
@@ -345,6 +348,7 @@ impl App {
 
         let x = origin.x + (width - row_w) / 2.0;
         let mut hovered = self.hovered.clone();
+        let mut forget = None;
         for (i, (s, st)) in rows.iter().enumerate() {
             let (col, line) = (i % COLUMNS, i / COLUMNS);
             let chip = Rect::from_min_size(
@@ -354,16 +358,36 @@ impl App {
                 ),
                 vec2(CHIP_W, CHIP_H),
             );
-            if ui
-                .interact(chip, ui.id().with(("chip", &s.id)), Sense::hover())
-                .hovered()
-            {
+            // Inactive chips take the right click to offer leaving the list;
+            // the others let it through to the general menu.
+            let inactive = *st == "inactive";
+            let sense = if inactive {
+                Sense::click()
+            } else {
+                Sense::hover()
+            };
+            let response = ui.interact(chip, ui.id().with(("chip", &s.id)), sense);
+            if response.hovered() {
                 hovered = Some(s.id.clone());
+            }
+            if inactive {
+                response.context_menu(|ui| {
+                    if ui.button("Quitar de la lista").clicked() {
+                        forget = Some(s.id.clone());
+                    }
+                    ui.separator();
+                    self.menu(ui);
+                });
             }
             let on = hovered.as_deref() == Some(s.id.as_str());
             draw_chip(ui.painter(), chip, s, st, on, t);
         }
         self.hovered = hovered;
+        if let (Some(id), Some(dir)) = (forget, &self.dir) {
+            sessions::forget(dir, &id);
+            self.dirty.store(true, Ordering::Relaxed);
+            ui.ctx().request_repaint();
+        }
         size
     }
 }
