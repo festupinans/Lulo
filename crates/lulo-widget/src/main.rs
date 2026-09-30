@@ -109,14 +109,13 @@ struct App {
     last_load: Option<Instant>,
     settings: Settings,
     autostart: bool,
-    glass: glass::Glass,
     expanded: bool,
     last_inside: Option<Instant>,
     /// Session whose details are shown; stays while the mouse moves down to them.
     hovered: Option<String>,
     /// Height of the details measured last frame, used to size the window.
     detail_h: f32,
-    geometry: Option<(Pos2, Vec2, f32)>,
+    geometry: Option<(Pos2, Vec2)>,
 }
 
 impl App {
@@ -128,7 +127,7 @@ impl App {
             .and_then(|d| watch(d, &dirty, cc.egui_ctx.clone()));
         fonts::install(&cc.egui_ctx);
         cc.egui_ctx.set_visuals(egui::Visuals::dark());
-        let glass = glass::apply(cc, settings.glass);
+        glass::apply(cc);
         App {
             dir,
             sessions: Vec::new(),
@@ -139,7 +138,6 @@ impl App {
             last_load: None,
             settings,
             autostart: autostart::is_enabled(),
-            glass,
             expanded: false,
             last_inside: None,
             hovered: None,
@@ -166,24 +164,17 @@ impl App {
         }
     }
 
-    /// Centers the window at the top of the screen and cuts it to the
-    /// island's shape.
-    fn place_window(&mut self, ctx: &egui::Context, size: Vec2, radius: f32) {
+    /// Centers the window at the top of the screen.
+    fn place_window(&mut self, ctx: &egui::Context, size: Vec2) {
         let screen = ctx
             .input(|i| i.viewport().monitor_size)
             .unwrap_or(vec2(1920.0, 1080.0));
         let size = size.round();
         let pos = pos2(((screen.x - size.x) / 2.0).max(0.0), TOP).round();
-        if self.geometry != Some((pos, size, radius)) {
+        if self.geometry != Some((pos, size)) {
             ctx.send_viewport_cmd(egui::ViewportCommand::InnerSize(size));
             ctx.send_viewport_cmd(egui::ViewportCommand::OuterPosition(pos));
-            let ppp = ctx.pixels_per_point();
-            self.glass.shape(
-                (size.x * ppp).round() as i32,
-                (size.y * ppp).round() as i32,
-                (radius * ppp).round() as i32,
-            );
-            self.geometry = Some((pos, size, radius));
+            self.geometry = Some((pos, size));
         }
     }
 
@@ -279,7 +270,7 @@ impl eframe::App for App {
         let (state, line) = island::headline(&rows);
         if !self.expanded {
             let size = self.draw_pill(ui, full.min, &rows, state, &line, t);
-            self.place_window(&ctx, size, PILL_H / 2.0);
+            self.place_window(&ctx, size);
             self.schedule_repaint(&ctx, FRAME_COLLAPSED);
         } else {
             let usage = self.usage.map(|u| {
@@ -287,7 +278,7 @@ impl eframe::App for App {
                 (self.refill.value(left, t, self.settings.animate), time)
             });
             let size = self.draw_open(ui, full.min, &rows, state, usage, now, t);
-            self.place_window(&ctx, size, RADIUS);
+            self.place_window(&ctx, size);
             self.schedule_repaint(&ctx, FRAME_EXPANDED);
         }
         drop(rows);
@@ -316,7 +307,7 @@ impl App {
         };
         let width = 8.0 + PILL_OCTOPUS + 9.0 + galley.size().x + dots_w + 17.0;
         let rect = Rect::from_min_size(origin, vec2(width, PILL_H));
-        paint_glass(painter, rect, PILL_H / 2.0, self.glass.blur);
+        paint_glass(painter, rect, PILL_H / 2.0, self.settings.glass);
 
         let mid = rect.center().y;
         let mascot = Rect::from_min_size(
@@ -368,7 +359,7 @@ impl App {
             2.0 * PAD + top_h
         };
         let rect = Rect::from_min_size(origin, vec2(width, height));
-        paint_glass(ui.painter(), rect, RADIUS, self.glass.blur);
+        paint_glass(ui.painter(), rect, RADIUS, self.settings.glass);
 
         let row_top = rect.top() + PAD;
         let mut x = rect.left() + PAD;
@@ -448,11 +439,13 @@ impl App {
 
 /// The glass: a translucent tint, lighter at the top, a thin bright edge and
 /// a highlight along the top like the edge of a pane.
-fn paint_glass(painter: &Painter, rect: Rect, radius: f32, blur: bool) {
-    let tint = if blur {
-        Color32::from_rgba_unmultiplied(26, 26, 38, 110)
+fn paint_glass(painter: &Painter, rect: Rect, radius: f32, glass: bool) {
+    // Without a system blur behind it, the tint has to be dense enough for
+    // the text to read over any window.
+    let tint = if glass {
+        Color32::from_rgba_unmultiplied(24, 24, 34, 205)
     } else {
-        Color32::from_rgba_unmultiplied(22, 22, 30, 235)
+        Color32::from_rgba_unmultiplied(22, 22, 30, 245)
     };
     let outline = rounded_rect(rect, radius);
     let shade = |y: f32| {

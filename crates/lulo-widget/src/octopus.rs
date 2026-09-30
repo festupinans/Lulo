@@ -77,7 +77,8 @@ pub fn paint(painter: &Painter, rect: Rect, state: &str, t: f64) {
         "editing" => editing(pen, t, c),
         "bash" => bash(pen, t, c),
         "reading" => reading(pen, t, c),
-        "subagent" => subagent(pen, t, c),
+        // Background work: the helper octopuses keep going on their own.
+        "subagent" | "background" => subagent(pen, t, c),
         "waiting" => waiting(pen, t, c),
         "done" => done(pen, t, c),
         "error" => error(pen, t, c),

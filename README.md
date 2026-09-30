@@ -28,7 +28,8 @@ Haz doble clic en `lulo-widget.exe`. Aparece como una isla de vidrio arriba en e
 - **Al pasar el ratón:** la isla se abre con una ficha por sesión (pulpo, proyecto, estado y barra de tareas hechas) y debajo un resumen («3 trabajando · 1 te espera · 1 terminó»). Se vuelve a plegar al sacar el ratón.
 - **Al pasar sobre una ficha:** debajo aparece qué hace ahora y sus tareas como pasos (hechas, la actual resaltada y las que faltan). Si espera permiso, dice para qué. Si no usa tareas, muestra el pedido.
 - **Anillos de uso:** con la isla abierta, a la izquierda, dos anillos alrededor del pulpo. El de color es el uso que te queda en la ventana de 5 horas de tu plan (verde, ámbar desde la mitad, rojo y latiendo al final). El blanco, más fino, es el tiempo que falta para que se restablezca. Ver [Sobre los anillos de uso](#sobre-los-anillos-de-uso).
-- **Vidrio:** en Windows 10 y 11 usa el desenfoque acrylic del sistema y la tipografía Segoe UI. Si se ve mal en tu equipo, pon `"glass": false` en `widget.json`.
+- **Vidrio:** la isla dibuja su propio vidrio translúcido con bordes redondos suaves (el desenfoque acrylic de Windows rellenaba el rectángulo entero de la ventana). Con `"glass": false` en `widget.json` queda casi opaca.
+- **Segundo plano:** si Claude termina su turno pero dejó comandos o subagentes corriendo en segundo plano, la sesión sale «En segundo plano» en vez de «Terminó», hasta que Claude Code avisa que acabaron.
 - **Menú (clic derecho):** "Iniciar con Windows" y "Cerrar Lulo".
 - **Inactiva:** una sesión sin eventos durante 5 minutos pasa a "Inactiva" y baja al final. "Esperando" nunca pasa a inactiva, porque necesita que respondas.
 - **Sesiones huérfanas:** si cierras una terminal sin `/exit`, Claude Code no envía `SessionEnd`. El widget borra esos archivos tras 12 horas sin eventos.

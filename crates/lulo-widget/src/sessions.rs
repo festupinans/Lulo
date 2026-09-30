@@ -17,6 +17,8 @@ pub struct Session {
     pub prompt: Option<String>,
     /// Claude's task list, when it keeps one.
     pub tasks: Vec<Task>,
+    /// Shells and subagents still running in the background.
+    pub background: usize,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -51,6 +53,7 @@ impl Session {
                     })
                 })
                 .collect(),
+            background: array(&v, "background").count(),
         })
     }
 
@@ -91,6 +94,7 @@ pub fn label(state: &str) -> &'static str {
         "subagent" => "Subagente",
         "tool" => "Herramienta",
         "waiting" => "Esperando",
+        "background" => "En segundo plano",
         "done" => "Terminó",
         "error" => "Error",
         "inactive" => "Inactiva",

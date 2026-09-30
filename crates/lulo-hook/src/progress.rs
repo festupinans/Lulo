@@ -11,6 +11,10 @@ use crate::state::{self, Action};
 /// Steps kept per prompt; older ones are dropped.
 const MAX_STEPS: usize = 15;
 const PROMPT_MAX_CHARS: usize = 240;
+/// Background tasks remembered at most; a leak can't grow the file forever.
+const MAX_BACKGROUND: usize = 20;
+/// Tools that stop a background shell.
+const STOP_TOOLS: &[&str] = &["KillShell", "KillBash", "TaskStop"];
 
 /// Returns the new record to write, or `None` to leave the file as it is.
 pub fn merge(prev: Option<Value>, input: &Value, action: &Action, now: u64) -> Option<Value> {
@@ -23,7 +27,7 @@ pub fn merge(prev: Option<Value>, input: &Value, action: &Action, now: u64) -> O
         _ => Map::new(),
     };
 
-    let tasks_changed = update_tasks(&mut rec, input);
+    let tasks_changed = update_tasks(&mut rec, input) | update_background(&mut rec, input);
     match action {
         Action::Write { state, detail } => {
             let cwd = str_field(input, "cwd").unwrap_or("");
@@ -32,6 +36,14 @@ pub fn merge(prev: Option<Value>, input: &Value, action: &Action, now: u64) -> O
             rec.insert("cwd".into(), json!(cwd));
             rec.insert("state".into(), json!(state.as_str()));
             rec.insert("detail".into(), json!(detail));
+            // The turn ended but shells or subagents it launched still run:
+            // the session isn't done until they report back.
+            let pending = background(&rec);
+            if event == "Stop" && !pending.is_empty() {
+                let first = pending[0].get("detail").cloned().unwrap_or(Value::Null);
+                rec.insert("state".into(), json!("background"));
+                rec.insert("detail".into(), first);
+            }
             rec.insert("event".into(), json!(event));
 
             if event == "UserPromptSubmit" {
@@ -132,6 +144,73 @@ fn update_tasks(rec: &mut Map<String, Value>, input: &Value) -> bool {
         return false;
     }
     rec.insert("tasks".into(), Value::Array(tasks));
+    true
+}
+
+fn background(rec: &Map<String, Value>) -> Vec<Value> {
+    rec.get("background")
+        .and_then(Value::as_array)
+        .cloned()
+        .unwrap_or_default()
+}
+
+/// Tracks the shells and subagents the main agent started with
+/// `run_in_background`. Hooks don't say when a background shell ends, so a
+/// finished one is dropped when Claude Code notifies that a background task
+/// completed, and a subagent when its SubagentStop arrives. Returns whether
+/// the list changed.
+fn update_background(rec: &mut Map<String, Value>, input: &Value) -> bool {
+    let event = str_field(input, "hook_event_name").unwrap_or("");
+    let tool = str_field(input, "tool_name").unwrap_or("");
+    let tool_input = input.get("tool_input").unwrap_or(&Value::Null);
+    let in_subagent = input.get("agent_id").is_some_and(|v| !v.is_null());
+    let mut list = background(rec);
+    let before = list.len();
+    let drop_first = |list: &mut Vec<Value>, kind: &str| {
+        if let Some(i) = list
+            .iter()
+            .position(|b| b.get("kind").and_then(Value::as_str) == Some(kind))
+        {
+            list.remove(i);
+        }
+    };
+
+    match event {
+        "PreToolUse"
+            if !in_subagent
+                && tool_input.get("run_in_background").and_then(Value::as_bool) == Some(true) =>
+        {
+            let kind = if state::tool_state(tool) == state::State::Subagent {
+                "agent"
+            } else {
+                "shell"
+            };
+            let detail = str_field(tool_input, "description")
+                .or_else(|| str_field(tool_input, "command"))
+                .map(clip);
+            list.push(
+                json!({ "id": str_field(input, "tool_use_id"), "kind": kind, "detail": detail }),
+            );
+            if list.len() > MAX_BACKGROUND {
+                list.remove(0);
+            }
+        }
+        "PreToolUse" if STOP_TOOLS.contains(&tool) => drop_first(&mut list, "shell"),
+        "SubagentStop" => drop_first(&mut list, "agent"),
+        // Subagents already leave through SubagentStop.
+        "Notification" if str_field(input, "notification_type") == Some("agent_completed") => {
+            drop_first(&mut list, "shell")
+        }
+        _ => {}
+    }
+    if list.len() == before {
+        return false;
+    }
+    if list.is_empty() {
+        rec.remove("background");
+    } else {
+        rec.insert("background".into(), Value::Array(list));
+    }
     true
 }
 
@@ -387,6 +466,70 @@ mod tests {
         assert_eq!(r["state"], "subagent");
         assert_eq!(r["steps"].as_array().unwrap().len(), 1);
         assert_eq!(r["ts"], 2);
+    }
+
+    #[test]
+    fn background_work_keeps_the_session_busy() {
+        let bg = |tool: &str, desc: &str| {
+            ev(
+                "PreToolUse",
+                json!({ "tool_name": tool, "tool_use_id": desc,
+                        "tool_input": { "description": desc, "run_in_background": true } }),
+            )
+        };
+        let r = step(None, ev("UserPromptSubmit", json!({ "prompt": "x" })), 1);
+        let r = step(r, bg("Bash", "Start dev server"), 2);
+        let r = step(r, bg("Agent", "Explore the API"), 3);
+        // A foreground call doesn't count.
+        let r = step(
+            r,
+            ev(
+                "PreToolUse",
+                json!({ "tool_name": "Bash", "tool_input": { "command": "ls" } }),
+            ),
+            4,
+        );
+        let r = step(r, ev("Stop", json!({})), 5).unwrap();
+        assert_eq!(r["state"], "background");
+        assert_eq!(r["detail"], "Start dev server");
+        assert_eq!(r["background"].as_array().unwrap().len(), 2);
+
+        // The subagent reports back, then the shell.
+        let r = step(Some(r), ev("SubagentStop", json!({ "agent_id": "a1" })), 6);
+        let r = step(r, ev("Stop", json!({})), 7).unwrap();
+        assert_eq!(r["state"], "background");
+        let done = ev(
+            "Notification",
+            json!({ "notification_type": "agent_completed" }),
+        );
+        let r = step(Some(r), done, 8);
+        let r = step(r, ev("Stop", json!({})), 9).unwrap();
+        assert_eq!(r["state"], "done");
+        assert!(r.get("background").is_none());
+    }
+
+    #[test]
+    fn stopping_a_shell_forgets_it() {
+        let r = step(None, ev("UserPromptSubmit", json!({ "prompt": "x" })), 1);
+        let r = step(
+            r,
+            ev(
+                "PreToolUse",
+                json!({ "tool_name": "Bash",
+                "tool_input": { "command": "npm run dev", "run_in_background": true } }),
+            ),
+            2,
+        );
+        let r = step(
+            r,
+            ev(
+                "PreToolUse",
+                json!({ "tool_name": "KillShell", "tool_input": {} }),
+            ),
+            3,
+        );
+        let r = step(r, ev("Stop", json!({})), 4).unwrap();
+        assert_eq!(r["state"], "done");
     }
 
     #[test]

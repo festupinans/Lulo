@@ -58,6 +58,19 @@ pub fn headline(rows: &[(&Session, &str)]) -> (&'static str, Line) {
         }
         return (state, line);
     }
+    if let Some((s, _)) = find(&|st| st == "background") {
+        let tasks = match s.background {
+            0 | 1 => "una tarea".to_string(),
+            n => format!("{n} tareas"),
+        };
+        return (
+            "background",
+            vec![(
+                format!("{} espera {tasks} en segundo plano", s.project),
+                Tone::Normal,
+            )],
+        );
+    }
     if rows.iter().any(|(_, st)| matches!(*st, "done" | "ready")) {
         let state = if rows.iter().any(|(_, st)| *st == "done") {
             "done"
@@ -190,6 +203,7 @@ mod tests {
             ts: 0,
             prompt: None,
             tasks: Vec::new(),
+            background: 0,
         }
     }
 
@@ -234,6 +248,18 @@ mod tests {
         );
         assert_eq!(text(&headline(&[(&docs, "inactive")]).1), "Sin actividad");
         assert_eq!(text(&headline(&[]).1), "Sin sesiones");
+    }
+
+    #[test]
+    fn background_work_is_not_done() {
+        let mut s = session("web", None);
+        s.background = 2;
+        let blog = session("blog", None);
+        let (state, line) = headline(&[(&blog, "done"), (&s, "background")]);
+        assert_eq!(
+            (state, text(&line).as_str()),
+            ("background", "web espera 2 tareas en segundo plano")
+        );
     }
 
     #[test]

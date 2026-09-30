@@ -14,6 +14,7 @@ pub fn look(state: &str) -> Look {
         "reading" => [125, 211, 252],
         "subagent" => [244, 114, 182],
         "waiting" => [251, 191, 36],
+        "background" => [129, 140, 248],
         "done" => [74, 222, 128],
         "error" => [248, 113, 113],
         "inactive" => [100, 116, 139],
