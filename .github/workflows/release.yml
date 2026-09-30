@@ -1,0 +1,40 @@
+name: Release
+
+# Builds the Windows binaries and publishes them as a GitHub release.
+# Runs when a version tag (v0.1.0, ...) is pushed, or by hand with a tag name.
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Version tag to create, for example v0.1.0"
+        required: true
+
+permissions:
+  contents: write
+
+jobs:
+  windows:
+    runs-on: windows-latest
+    env:
+      TAG: ${{ github.event.inputs.tag || github.ref_name }}
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo build --release
+      - name: Package
+        shell: pwsh
+        run: |
+          Copy-Item target/release/lulo-hook.exe, target/release/lulo-widget.exe .
+          Compress-Archive -Path lulo-hook.exe, lulo-widget.exe, INSTALACION.md -DestinationPath lulo-windows-x64.zip
+      - name: Publish
+        shell: bash
+        run: >
+          gh release create "$TAG"
+          --target "$GITHUB_SHA"
+          --title "Lulo $TAG"
+          --notes-file .github/release-notes.md
+          lulo-windows-x64.zip lulo-hook.exe lulo-widget.exe

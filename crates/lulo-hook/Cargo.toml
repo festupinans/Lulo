@@ -1,0 +1,10 @@
+[package]
+name = "lulo-hook"
+version = "0.1.0"
+description = "Claude Code hook that records each session's live state for the Lulo widget"
+edition.workspace = true
+repository.workspace = true
+
+[dependencies]
+# preserve_order keeps the user's settings.json key order when we rewrite it.
+serde_json = { version = "1", features = ["preserve_order"] }
