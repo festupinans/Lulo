@@ -3,14 +3,21 @@
 //! rounded corners, no border and no shadow around the window rectangle.
 
 #[cfg(windows)]
-pub fn apply(window: &impl raw_window_handle::HasWindowHandle) {
-    use raw_window_handle::RawWindowHandle;
+pub fn apply(cc: &eframe::CreationContext<'_>) {
+    use raw_window_handle::{HasWindowHandle, RawWindowHandle};
     use windows_sys::Win32::Graphics::Dwm::{
-        DwmSetWindowAttribute, DWMNCRP_DISABLED, DWMWA_BORDER_COLOR, DWMWA_COLOR_NONE,
-        DWMWA_NCRENDERING_POLICY, DWMWA_WINDOW_CORNER_PREFERENCE, DWMWCP_DONOTROUND,
+        DwmSetWindowAttribute, DWMWA_BORDER_COLOR, DWMWA_COLOR_NONE,
+        DWMWA_WINDOW_CORNER_PREFERENCE, DWMWCP_DONOTROUND,
     };
+    use winit::platform::windows::WindowExtWindows;
 
-    let Ok(RawWindowHandle::Win32(h)) = window.window_handle().map(|h| h.as_raw()) else {
+    // eframe asks for a drop shadow on undecorated windows. Turning it off
+    // through winit keeps the rest of its frameless handling intact; turning
+    // off the system frame drawing instead made the title bar flash on resize.
+    if let Some(window) = cc.winit_window() {
+        window.set_undecorated_shadow(false);
+    }
+    let Ok(RawWindowHandle::Win32(h)) = cc.window_handle().map(|h| h.as_raw()) else {
         return;
     };
     let hwnd = h.hwnd.get() as _;
@@ -22,13 +29,11 @@ pub fn apply(window: &impl raw_window_handle::HasWindowHandle) {
             size_of_val(&value) as u32,
         );
     };
-    // Windows 11 rounds the window rectangle and draws a thin border and a
-    // shadow around it, which showed as a frame around the open widget.
+    // Windows 11 rounds the window rectangle and draws a thin border around
+    // it, which showed as a frame around the open widget.
     set(DWMWA_WINDOW_CORNER_PREFERENCE, DWMWCP_DONOTROUND as u32);
     set(DWMWA_BORDER_COLOR, DWMWA_COLOR_NONE);
-    // No frame drawing by the system at all, which also drops the shadow.
-    set(DWMWA_NCRENDERING_POLICY, DWMNCRP_DISABLED as u32);
 }
 
 #[cfg(not(windows))]
-pub fn apply(_window: &impl raw_window_handle::HasWindowHandle) {}
+pub fn apply(_cc: &eframe::CreationContext<'_>) {}
