@@ -1,13 +1,15 @@
 //! Lulo: a glass panel docked to the right edge of the screen that shows
 //! every Claude Code session and what it is doing right now.
 //!
-//! Collapsed it is a thin strip of colored dots, one per session. Hovering
-//! it slides the list out; hovering a session adds a card with its prompt,
-//! task list and recent steps.
+//! Collapsed it is a thin strip with the octopus mascot on top, acting out
+//! the most urgent state, and a colored dot per session. Hovering it slides
+//! the list out; hovering a session adds a card with its prompt, task list
+//! and recent steps.
 //!
-//! It watches the folder `lulo-hook` writes to and only redraws when a file
-//! changes or the mouse is over it (plus a slow tick for the age labels),
-//! so it idles at ~0 CPU.
+//! It watches the folder `lulo-hook` writes to. Without animations it only
+//! redraws when a file changes or the mouse is over it (plus a slow tick for
+//! the age labels); with them, the octopus runs at a low frame rate while
+//! collapsed and a smooth one while the panel is open.
 
 // No console window behind the widget on Windows.
 #![cfg_attr(windows, windows_subsystem = "windows")]
@@ -15,6 +17,7 @@
 mod autostart;
 mod fonts;
 mod glass;
+mod octopus;
 mod sessions;
 mod settings;
 mod style;
@@ -39,8 +42,15 @@ const TICK: Duration = Duration::from_secs(15);
 const RELOAD: Duration = Duration::from_secs(60);
 /// How long the panel stays open after the mouse leaves it.
 const COLLAPSE_DELAY: Duration = Duration::from_millis(350);
+/// Animation frame rates: the tiny collapsed octopus doesn't need many.
+const FRAME_COLLAPSED: Duration = Duration::from_millis(1000 / 12);
+const FRAME_EXPANDED: Duration = Duration::from_millis(1000 / 30);
 
-const STRIP_W: f32 = 22.0;
+const STRIP_W: f32 = 30.0;
+/// Octopus sizes: collapsed strip, list header and session card.
+const MASCOT_STRIP: f32 = 26.0;
+const MASCOT_HEADER: f32 = 22.0;
+const MASCOT_CARD: f32 = 64.0;
 const LIST_W: f32 = 300.0;
 const DETAIL_W: f32 = 330.0;
 const PAD: f32 = 12.0;
@@ -162,6 +172,13 @@ impl App {
     }
 }
 
+impl App {
+    /// Next frame for the animation, or just the slow tick when it is off.
+    fn schedule_repaint(&self, ctx: &egui::Context, frame: Duration) {
+        ctx.request_repaint_after(if self.settings.animate { frame } else { TICK });
+    }
+}
+
 /// Watches `dir` (creating it if needed) and wakes the UI on any change.
 fn watch(
     dir: &PathBuf,
@@ -197,6 +214,12 @@ impl eframe::App for App {
             self.last_load = Some(Instant::now());
         }
         self.update_expanded(&ctx);
+        // Still octopus when animations are off: a fixed moment of each scene.
+        let t = if self.settings.animate {
+            ctx.input(|i| i.time)
+        } else {
+            0.0
+        };
 
         // Rows that need attention stay on top; inactive ones sink.
         let inactive_secs = self.settings.inactive_secs();
@@ -243,10 +266,11 @@ impl eframe::App for App {
             }
         });
 
+        let urgent = octopus::most_urgent(rows.iter().map(|(_, state)| *state));
         if !self.expanded {
-            let height = draw_strip(ui, full, &rows);
+            let height = draw_strip(ui, full, &rows, urgent, t);
             self.place_window(&ctx, STRIP_W, height, false);
-            ctx.request_repaint_after(TICK);
+            self.schedule_repaint(&ctx, FRAME_COLLAPSED);
             return;
         }
 
@@ -254,7 +278,7 @@ impl eframe::App for App {
         let list_rect = Rect::from_min_max(pos2(full.right() - LIST_W, full.top()), full.max);
         let mut hovered = self.hovered.clone();
         let list = ui.scope_builder(UiBuilder::new().max_rect(list_rect.shrink(PAD)), |ui| {
-            list_header(ui, rows.len());
+            list_header(ui, rows.len(), urgent, t);
             if rows.is_empty() {
                 ui.label(RichText::new("Sin sesiones de Claude Code").color(style::MUTED));
             }
@@ -282,7 +306,7 @@ impl eframe::App for App {
             );
             let card = ui.scope_builder(UiBuilder::new().max_rect(card_rect.shrink(PAD)), |ui| {
                 ui.set_width(DETAIL_W - 2.0 * PAD);
-                detail_card(ui, s, state, now)
+                detail_card(ui, s, state, now, t)
             });
             self.detail_h = card.response.rect.height() + 2.0 * PAD;
             LIST_W + DETAIL_W
@@ -290,31 +314,42 @@ impl eframe::App for App {
             LIST_W
         };
         self.place_window(&ctx, width, self.list_h, card.is_some());
-        ctx.request_repaint_after(TICK);
+        self.schedule_repaint(&ctx, FRAME_EXPANDED);
     }
 }
 
-/// Collapsed look: one colored dot per session. Returns the height it needs.
-fn draw_strip(ui: &egui::Ui, rect: Rect, rows: &[(&Session, &str)]) -> f32 {
+/// Collapsed look: the octopus on top, then one colored dot per session.
+/// Returns the height it needs.
+fn draw_strip(ui: &egui::Ui, rect: Rect, rows: &[(&Session, &str)], urgent: &str, t: f64) -> f32 {
     let painter = ui.painter();
     let x = rect.center().x;
-    if rows.is_empty() {
-        painter.circle_filled(pos2(x, rect.top() + PAD + 4.0), 3.0, style::MUTED);
-        return 2.0 * PAD + 8.0;
-    }
+    let mascot = Rect::from_center_size(
+        pos2(x, rect.top() + 6.0 + MASCOT_STRIP / 2.0),
+        Vec2::splat(MASCOT_STRIP),
+    );
+    octopus::paint(painter, mascot, urgent, t);
+    let first = mascot.bottom() + 10.0;
     for (i, (_, state)) in rows.iter().enumerate() {
-        let y = rect.top() + PAD + 4.0 + i as f32 * DOT_STEP;
+        let y = first + i as f32 * DOT_STEP;
         let color = style::look(state).color;
         if *state == "waiting" {
             painter.circle_stroke(pos2(x, y), 6.5, Stroke::new(1.5, color.gamma_multiply(0.5)));
         }
         painter.circle_filled(pos2(x, y), 4.0, color);
     }
-    2.0 * PAD + 8.0 + (rows.len() - 1) as f32 * DOT_STEP
+    let dots = rows.len().saturating_sub(1) as f32 * DOT_STEP;
+    let bottom = if rows.is_empty() {
+        mascot.bottom() + 6.0
+    } else {
+        first + dots + PAD
+    };
+    bottom - rect.top()
 }
 
-fn list_header(ui: &mut egui::Ui, count: usize) {
+fn list_header(ui: &mut egui::Ui, count: usize, urgent: &str, t: f64) {
     ui.horizontal(|ui| {
+        let (mascot, _) = ui.allocate_exact_size(Vec2::splat(MASCOT_HEADER), Sense::hover());
+        octopus::paint(ui.painter(), mascot, urgent, t);
         ui.label(
             RichText::new("CLAUDE CODE")
                 .size(11.0)
@@ -382,15 +417,20 @@ fn session_row(ui: &mut egui::Ui, s: &Session, state: &str, now: u64, highlighte
 }
 
 /// Everything known about one session: prompt, current step, tasks, history.
-fn detail_card(ui: &mut egui::Ui, s: &Session, state: &str, now: u64) {
+fn detail_card(ui: &mut egui::Ui, s: &Session, state: &str, now: u64, t: f64) {
     let look = style::look(state);
     ui.spacing_mut().item_spacing.y = 6.0;
 
     ui.horizontal(|ui| {
-        ui.label(RichText::new(&s.project).size(16.0).color(style::TEXT));
-        ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+        let (mascot, _) = ui.allocate_exact_size(Vec2::splat(MASCOT_CARD), Sense::hover());
+        octopus::paint(ui.painter(), mascot, state, t);
+        ui.vertical(|ui| {
+            ui.add_space(10.0);
+            ui.add(
+                egui::Label::new(RichText::new(&s.project).size(16.0).color(style::TEXT))
+                    .truncate(),
+            );
             ui.label(RichText::new(sessions::label(state)).color(look.color));
-            ui.label(RichText::new(look.icon).color(look.color));
         });
     });
 

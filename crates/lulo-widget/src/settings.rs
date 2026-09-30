@@ -11,6 +11,8 @@ pub struct Settings {
     /// Windows acrylic blur behind the widget. Off falls back to a plain
     /// translucent background.
     pub glass: bool,
+    /// Animates the octopus. Off draws it still and keeps the widget idle.
+    pub animate: bool,
     /// Minutes without hook events before a session shows as "Inactiva".
     pub inactive_minutes: u64,
     /// Hours without hook events before a session's file is deleted.
@@ -21,6 +23,7 @@ impl Default for Settings {
     fn default() -> Self {
         Settings {
             glass: true,
+            animate: true,
             inactive_minutes: 5,
             forget_hours: 12,
         }
@@ -51,6 +54,9 @@ impl Settings {
         if let Some(g) = v.get("glass").and_then(Value::as_bool) {
             s.glass = g;
         }
+        if let Some(a) = v.get("animate").and_then(Value::as_bool) {
+            s.animate = a;
+        }
         if let Some(m) = v.get("inactive_minutes").and_then(Value::as_u64) {
             s.inactive_minutes = m;
         }
@@ -68,6 +74,7 @@ impl Settings {
         }
         let v = json!({
             "glass": self.glass,
+            "animate": self.animate,
             "inactive_minutes": self.inactive_minutes,
             "forget_hours": self.forget_hours,
         });
@@ -98,8 +105,9 @@ mod tests {
     #[test]
     fn parses_with_defaults() {
         assert_eq!(Settings::parse("not json"), Settings::default());
-        let s = Settings::parse(r#"{"glass": false, "inactive_minutes": 2}"#);
+        let s = Settings::parse(r#"{"glass": false, "animate": false, "inactive_minutes": 2}"#);
         assert!(!s.glass);
+        assert!(!s.animate);
         assert_eq!(s.inactive_secs(), 120);
         assert_eq!(s.forget_secs(), 12 * 3600);
         // Zero would hide everything instantly; clamp to one unit.
