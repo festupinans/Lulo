@@ -146,6 +146,29 @@ fn bad_input_is_ignored_silently() {
 }
 
 #[test]
+fn input_with_a_bom_is_accepted() {
+    let dir = temp_dir("bom");
+    let mut child = bin()
+        .env("LULO_STATUS_DIR", &dir)
+        .stdin(Stdio::piped())
+        .spawn()
+        .unwrap();
+    let mut input = b"\xEF\xBB\xBF".to_vec();
+    input.extend_from_slice(
+        br#"{"session_id":"bom-1","cwd":"C:\\x\\Demo","hook_event_name":"Stop"}"#,
+    );
+    child.stdin.take().unwrap().write_all(&input).unwrap();
+    assert!(child.wait().unwrap().success());
+    let r: serde_json::Value =
+        serde_json::from_str(&fs::read_to_string(dir.join("bom-1.json")).unwrap()).unwrap();
+    assert_eq!(
+        (r["state"].as_str(), r["project"].as_str()),
+        (Some("done"), Some("Demo"))
+    );
+    fs::remove_dir_all(&dir).unwrap();
+}
+
+#[test]
 fn install_then_uninstall_round_trip() {
     let dir = temp_dir("install");
     let settings = dir.join("settings.json");
