@@ -14,6 +14,7 @@
 // No console window behind the widget on Windows.
 #![cfg_attr(windows, windows_subsystem = "windows")]
 
+mod account;
 mod autostart;
 mod fonts;
 mod glass;
@@ -125,6 +126,10 @@ impl App {
         let watcher = dir
             .as_ref()
             .and_then(|d| watch(d, &dirty, cc.egui_ctx.clone()));
+        if let (Some(dir), true) = (&dir, settings.account_usage) {
+            let ctx = cc.egui_ctx.clone();
+            account::start(dir.clone(), move || ctx.request_repaint());
+        }
         fonts::install(&cc.egui_ctx);
         cc.egui_ctx.set_visuals(egui::Visuals::dark());
         glass::apply(cc);

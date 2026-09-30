@@ -17,6 +17,9 @@ pub struct Settings {
     pub inactive_minutes: u64,
     /// Hours without hook events before a session's file is deleted.
     pub forget_hours: u64,
+    /// Asks Anthropic for the plan usage with the saved Claude login, for
+    /// the rings when no status line reports it (the desktop app).
+    pub account_usage: bool,
 }
 
 impl Default for Settings {
@@ -26,6 +29,7 @@ impl Default for Settings {
             animate: true,
             inactive_minutes: 5,
             forget_hours: 12,
+            account_usage: true,
         }
     }
 }
@@ -63,6 +67,9 @@ impl Settings {
         if let Some(h) = v.get("forget_hours").and_then(Value::as_u64) {
             s.forget_hours = h;
         }
+        if let Some(a) = v.get("account_usage").and_then(Value::as_bool) {
+            s.account_usage = a;
+        }
         s
     }
 
@@ -77,6 +84,7 @@ impl Settings {
             "animate": self.animate,
             "inactive_minutes": self.inactive_minutes,
             "forget_hours": self.forget_hours,
+            "account_usage": self.account_usage,
         });
         let _ = fs::write(path, serde_json::to_string_pretty(&v).unwrap_or_default());
     }
@@ -108,6 +116,8 @@ mod tests {
         let s = Settings::parse(r#"{"glass": false, "animate": false, "inactive_minutes": 2}"#);
         assert!(!s.glass);
         assert!(!s.animate);
+        assert!(s.account_usage);
+        assert!(!Settings::parse(r#"{"account_usage": false}"#).account_usage);
         assert_eq!(s.inactive_secs(), 120);
         assert_eq!(s.forget_secs(), 12 * 3600);
         // Zero would hide everything instantly; clamp to one unit.

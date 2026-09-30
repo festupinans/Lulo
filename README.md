@@ -38,16 +38,17 @@ Haz doble clic en `lulo-widget.exe`. Aparece como una isla de vidrio arriba en e
 La configuración está en `%LOCALAPPDATA%\Lulo\widget.json`:
 
 ```json
-{ "glass": true, "animate": true, "inactive_minutes": 5, "forget_hours": 12 }
+{ "glass": true, "animate": true, "inactive_minutes": 5, "forget_hours": 12, "account_usage": true }
 ```
 
 ### Sobre los anillos de uso
 
-Los hooks de Claude Code no traen el uso del plan; solo lo trae la línea de estado (status line). Por eso la instalación también pone `lulo-hook.exe statusline` como línea de estado en `settings.json`: guarda el uso en `claude-status\_usage.json` para el widget y muestra en la terminal una línea como `Opus · Lulo · 5 h: 34 % usado, reinicia en 2 h 10 min`.
+Los hooks de Claude Code no traen el uso del plan. Lulo lo obtiene de dos formas y usa la más reciente:
 
-- Si ya tenías una línea de estado propia, Lulo no la toca y te avisa: los anillos no aparecerán hasta que la quites y vuelvas a instalar.
-- Claude Code solo da estos datos en los planes Pro y Max (no con clave de API), y a partir de la primera respuesta de cada sesión. Sin datos, la isla muestra solo las fichas.
-- `lulo-hook.exe uninstall` quita también la línea de estado de Lulo.
+- **Línea de estado (terminal):** la instalación pone `lulo-hook.exe statusline` como línea de estado en `settings.json`. Guarda el uso en `claude-status\_usage.json` y muestra en la terminal algo como `Opus · Lulo · 5 h: 34 % usado, reinicia en 2 h 10 min`. Si ya tenías una línea de estado propia, Lulo no la toca y te avisa.
+- **Tu cuenta (app de escritorio):** la app no ejecuta la línea de estado, así que el widget consulta el uso a Anthropic cada 5 minutos, igual que `/usage`. Para eso lee el acceso que Claude Code guarda en `~/.claude/.credentials.json`. El acceso solo se envía a Anthropic, nunca se guarda en otro sitio y Lulo no lo renueva: si caducó, espera a que Claude Code lo renueve. Esta consulta no está documentada por Anthropic y puede dejar de funcionar; en ese caso los anillos simplemente no aparecen. Se desactiva con `"account_usage": false` en `widget.json`. Usa el `curl` que trae Windows 10 y 11.
+
+Solo hay datos en los planes Pro y Max. Sin datos, la isla muestra solo las fichas. `lulo-hook.exe uninstall` quita también la línea de estado de Lulo.
 
 ### Sobre la lista de tareas
 
