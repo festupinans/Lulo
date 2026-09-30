@@ -8,7 +8,7 @@ Funciona con [hooks de Claude Code](https://code.claude.com/docs/en/hooks): cada
 
 - [x] Fase 1: binario del hook e instalación en `settings.json`
 - [x] Fase 2: widget básico que lista las sesiones
-- [ ] Fase 3: colores, iconos, posición y arrastre
+- [x] Fase 3: colores, iconos, posición y arrastre
 - [ ] Fase 4: sesiones inactivas y pulido
 
 ## Instalar el hook
@@ -21,7 +21,11 @@ Desde una terminal también funcionan `lulo-hook.exe install`, `lulo-hook.exe un
 
 ## Abrir el widget
 
-Haz doble clic en `lulo-widget.exe`. Es una ventana pequeña, siempre encima, con una fila por sesión: proyecto, estado y hace cuánto fue el último evento. Pasa el ratón sobre el estado para ver el detalle (archivo, comando…). Solo se redibuja cuando cambia un archivo de estado, más un refresco cada 15 s para los tiempos.
+Haz doble clic en `lulo-widget.exe`. Aparece una ventana pequeña, sin bordes, semitransparente y siempre encima, fuera de la barra de tareas. Tiene una fila por sesión con icono y color según el estado, el proyecto, el detalle (archivo, comando…) y hace cuánto fue el último evento. La altura se ajusta al número de sesiones.
+
+- **Mover:** arrástrala desde cualquier punto. La posición se guarda en `%LOCALAPPDATA%\Lulo\widget.json` y se recupera al abrirla.
+- **Cerrar:** clic derecho y "Cerrar Lulo".
+- Solo se redibuja cuando cambia un archivo de estado, más un refresco cada 15 s para los tiempos.
 
 ## Archivo de estado
 
