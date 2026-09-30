@@ -2,22 +2,26 @@
 
 Widget para Windows, siempre visible, que muestra en tiempo real el estado de todas tus sesiones de Claude Code: pensando, editando, en el bash, leyendo, con un subagente, esperando permiso o terminada.
 
-Funciona con [hooks de Claude Code](https://code.claude.com/docs/en/hooks): cada evento ejecuta `lulo-hook.exe`, que escribe el estado de la sesión en `%LOCALAPPDATA%\claude-status\<session_id>.json`. El widget (fase 2) vigila esa carpeta.
+Funciona con [hooks de Claude Code](https://code.claude.com/docs/en/hooks): cada evento ejecuta `lulo-hook.exe`, que escribe el estado de la sesión en `%LOCALAPPDATA%\claude-status\<session_id>.json`. `lulo-widget.exe` vigila esa carpeta y muestra una fila por sesión.
 
 ## Estado del proyecto
 
 - [x] Fase 1: binario del hook e instalación en `settings.json`
-- [ ] Fase 2: widget básico que lista las sesiones
+- [x] Fase 2: widget básico que lista las sesiones
 - [ ] Fase 3: colores, iconos, posición y arrastre
 - [ ] Fase 4: sesiones inactivas y pulido
 
 ## Instalar el hook
 
-1. Descarga `lulo-hook.exe` (artefacto `lulo-hook-windows-x64` del último build de CI) o compílalo con `cargo build --release -p lulo-hook`.
+1. Descarga el artefacto `lulo-windows-x64` del último build de CI (trae `lulo-hook.exe` y `lulo-widget.exe`) o compílalos con `cargo build --release`.
 2. Haz doble clic en él. Se copia a `%LOCALAPPDATA%\Lulo\lulo-hook.exe` y añade los hooks a `~/.claude/settings.json` sin tocar el resto del archivo, guardando antes una copia (`settings.json.lulo-backup-<fecha>`). Puedes repetirlo cuando quieras: nunca duplica entradas.
 3. Reinicia las sesiones de Claude Code abiertas para que carguen los hooks.
 
 Desde una terminal también funcionan `lulo-hook.exe install`, `lulo-hook.exe uninstall` y `lulo-hook.exe status-dir` (carpeta donde escribe los estados).
+
+## Abrir el widget
+
+Haz doble clic en `lulo-widget.exe`. Es una ventana pequeña, siempre encima, con una fila por sesión: proyecto, estado y hace cuánto fue el último evento. Pasa el ratón sobre el estado para ver el detalle (archivo, comando…). Solo se redibuja cuando cambia un archivo de estado, más un refresco cada 15 s para los tiempos.
 
 ## Archivo de estado
 

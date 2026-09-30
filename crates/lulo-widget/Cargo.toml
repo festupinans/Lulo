@@ -1,0 +1,12 @@
+[package]
+name = "lulo-widget"
+version = "0.1.0"
+description = "Always-on-top widget showing the live state of every Claude Code session"
+edition.workspace = true
+repository.workspace = true
+
+[dependencies]
+# glow (OpenGL) instead of the default wgpu backend: far less memory for a tiny window.
+eframe = { version = "0.36", default-features = false, features = ["glow", "default_fonts", "x11", "wayland"] }
+notify = "8"
+serde_json = "1"
