@@ -13,6 +13,6 @@ serde_json = "1"
 raw-window-handle = "0.6"
 
 [target.'cfg(windows)'.dependencies]
-windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_Graphics_Dwm"] }
+windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_Graphics_Dwm", "Win32_UI_WindowsAndMessaging"] }
 # The same winit eframe uses, to turn off the drop shadow it asks for.
 winit = { version = "0.30", default-features = false }
