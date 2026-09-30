@@ -1,0 +1,14 @@
+[workspace]
+resolver = "2"
+members = ["crates/lulo-hook"]
+
+[workspace.package]
+edition = "2021"
+repository = "https://github.com/festupinans/Lulo"
+
+[profile.release]
+opt-level = 3
+lto = true
+codegen-units = 1
+panic = "abort"
+strip = true
