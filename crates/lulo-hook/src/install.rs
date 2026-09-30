@@ -18,6 +18,8 @@ pub const EVENTS: &[&str] = &[
     "PermissionRequest",
     "Notification",
     "SubagentStop",
+    "TaskCreated",
+    "TaskCompleted",
     "Stop",
     "StopFailure",
     "SessionEnd",

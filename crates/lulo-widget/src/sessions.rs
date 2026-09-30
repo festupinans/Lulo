@@ -13,6 +13,28 @@ pub struct Session {
     pub detail: Option<String>,
     /// Unix seconds of the last hook event.
     pub ts: u64,
+    /// The last prompt, clipped by the hook.
+    pub prompt: Option<String>,
+    /// Unix seconds when that prompt was sent.
+    pub started: Option<u64>,
+    /// Actions taken for the current prompt, oldest first.
+    pub steps: Vec<Step>,
+    /// Claude's task list, when it keeps one.
+    pub tasks: Vec<Task>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Step {
+    pub state: String,
+    pub detail: Option<String>,
+    pub ts: u64,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Task {
+    pub text: String,
+    /// "pending", "in_progress" or "completed".
+    pub status: String,
 }
 
 impl Session {
@@ -27,7 +49,40 @@ impl Session {
             state: s("state")?,
             detail: s("detail").filter(|d| !d.is_empty()),
             ts: v.get("ts").and_then(Value::as_u64).unwrap_or(0),
+            prompt: s("prompt").filter(|p| !p.is_empty()),
+            started: v.get("started").and_then(Value::as_u64),
+            steps: array(&v, "steps")
+                .filter_map(|st| {
+                    Some(Step {
+                        state: st.get("state")?.as_str()?.to_string(),
+                        detail: st.get("detail").and_then(Value::as_str).map(str::to_string),
+                        ts: st.get("ts").and_then(Value::as_u64).unwrap_or(0),
+                    })
+                })
+                .collect(),
+            tasks: array(&v, "tasks")
+                .filter_map(|t| {
+                    Some(Task {
+                        text: t.get("text")?.as_str()?.to_string(),
+                        status: t
+                            .get("status")
+                            .and_then(Value::as_str)
+                            .unwrap_or("pending")
+                            .to_string(),
+                    })
+                })
+                .collect(),
         })
+    }
+
+    /// (completed, total) tasks.
+    pub fn task_counts(&self) -> (usize, usize) {
+        let done = self
+            .tasks
+            .iter()
+            .filter(|t| t.status == "completed")
+            .count();
+        (done, self.tasks.len())
     }
 
     /// The state to show: any state except "waiting" turns "inactive" after
@@ -40,6 +95,10 @@ impl Session {
             &self.state
         }
     }
+}
+
+fn array<'a>(v: &'a Value, key: &str) -> impl Iterator<Item = &'a Value> {
+    v.get(key).and_then(Value::as_array).into_iter().flatten()
 }
 
 /// Spanish label for a state.
@@ -136,6 +195,22 @@ mod tests {
 
         assert!(Session::parse("{").is_none());
         assert!(Session::parse(r#"{"state":"done"}"#).is_none());
+    }
+
+    #[test]
+    fn parses_progress() {
+        let s = Session::parse(
+            r#"{"session_id":"a","state":"editing","ts":9,"prompt":"Arregla el login","started":5,
+                "steps":[{"state":"reading","detail":"a.rs","ts":6},{"state":"editing","detail":null,"ts":8},{"bad":1}],
+                "tasks":[{"id":"1","text":"Leer","status":"completed"},{"id":"2","text":"Arreglar","status":"in_progress"},{"text":"Probar"}]}"#,
+        )
+        .unwrap();
+        assert_eq!(s.prompt.as_deref(), Some("Arregla el login"));
+        assert_eq!(s.started, Some(5));
+        assert_eq!(s.steps.len(), 2);
+        assert_eq!(s.steps[1].detail, None);
+        assert_eq!(s.tasks[2].status, "pending");
+        assert_eq!(s.task_counts(), (1, 3));
     }
 
     #[test]

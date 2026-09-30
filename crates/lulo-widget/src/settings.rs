@@ -1,5 +1,5 @@
-//! Widget settings in `%LOCALAPPDATA%\Lulo\widget.json`: the window position
-//! plus two thresholds the user can edit by hand.
+//! Widget settings in `%LOCALAPPDATA%\Lulo\widget.json`, meant to be edited
+//! by hand.
 
 use std::fs;
 use std::path::PathBuf;
@@ -8,7 +8,9 @@ use serde_json::{json, Value};
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct Settings {
-    pub position: Option<[f32; 2]>,
+    /// Windows acrylic blur behind the widget. Off falls back to a plain
+    /// translucent background.
+    pub glass: bool,
     /// Minutes without hook events before a session shows as "Inactiva".
     pub inactive_minutes: u64,
     /// Hours without hook events before a session's file is deleted.
@@ -18,7 +20,7 @@ pub struct Settings {
 impl Default for Settings {
     fn default() -> Self {
         Settings {
-            position: None,
+            glass: true,
             inactive_minutes: 5,
             forget_hours: 12,
         }
@@ -46,11 +48,8 @@ impl Settings {
         let Ok(v) = serde_json::from_str::<Value>(text) else {
             return s;
         };
-        let num = |k: &str| v.get(k).and_then(Value::as_f64);
-        if let (Some(x), Some(y)) = (num("x"), num("y")) {
-            if x.is_finite() && y.is_finite() {
-                s.position = Some([x as f32, y as f32]);
-            }
+        if let Some(g) = v.get("glass").and_then(Value::as_bool) {
+            s.glass = g;
         }
         if let Some(m) = v.get("inactive_minutes").and_then(Value::as_u64) {
             s.inactive_minutes = m;
@@ -67,14 +66,11 @@ impl Settings {
         if let Some(dir) = path.parent() {
             let _ = fs::create_dir_all(dir);
         }
-        let mut v = json!({
+        let v = json!({
+            "glass": self.glass,
             "inactive_minutes": self.inactive_minutes,
             "forget_hours": self.forget_hours,
         });
-        if let Some([x, y]) = self.position {
-            v["x"] = json!(x);
-            v["y"] = json!(y);
-        }
         let _ = fs::write(path, serde_json::to_string_pretty(&v).unwrap_or_default());
     }
 }
@@ -102,8 +98,8 @@ mod tests {
     #[test]
     fn parses_with_defaults() {
         assert_eq!(Settings::parse("not json"), Settings::default());
-        let s = Settings::parse(r#"{"x": 10, "y": 20.5, "inactive_minutes": 2}"#);
-        assert_eq!(s.position, Some([10.0, 20.5]));
+        let s = Settings::parse(r#"{"glass": false, "inactive_minutes": 2}"#);
+        assert!(!s.glass);
         assert_eq!(s.inactive_secs(), 120);
         assert_eq!(s.forget_secs(), 12 * 3600);
         // Zero would hide everything instantly; clamp to one unit.

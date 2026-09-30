@@ -28,5 +28,14 @@ pub fn look(state: &str) -> Look {
     }
 }
 
-/// Window background: dark and slightly see-through.
-pub const BACKGROUND: Color32 = Color32::from_rgba_premultiplied(18, 18, 22, 225);
+/// Window background without the Windows blur: dark and slightly see-through.
+pub const BACKGROUND: Color32 = Color32::from_rgba_premultiplied(15, 15, 20, 235);
+/// Tint over the acrylic blur, light enough to let it show through.
+pub const GLASS_TINT: Color32 = Color32::from_rgba_premultiplied(10, 10, 14, 150);
+/// Thin highlight around the panel, like the edge of a glass pane.
+pub const EDGE: Color32 = Color32::from_rgba_premultiplied(40, 40, 44, 40);
+pub const ROW_HOVER: Color32 = Color32::from_rgba_premultiplied(14, 14, 16, 16);
+pub const TEXT: Color32 = Color32::from_rgb(236, 236, 241);
+pub const TEXT_DIM: Color32 = Color32::from_rgb(180, 182, 192);
+pub const MUTED: Color32 = Color32::from_rgb(120, 124, 138);
+pub const ACCENT: Color32 = Color32::from_rgb(167, 139, 250);

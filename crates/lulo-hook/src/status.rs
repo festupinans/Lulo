@@ -6,8 +6,9 @@ use std::path::{Path, PathBuf};
 use std::thread;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
-use serde_json::{json, Value};
+use serde_json::Value;
 
+use crate::progress;
 use crate::state::{self, Action};
 
 /// `%LOCALAPPDATA%\claude-status` on Windows. `LULO_STATUS_DIR` overrides it,
@@ -40,37 +41,19 @@ pub fn apply(dir: &Path, input: &Value) -> io::Result<()> {
         return Ok(());
     };
 
-    match state::classify(input) {
-        Action::Ignore => Ok(()),
-        Action::Remove => match fs::remove_file(&file) {
+    let action = state::classify(input);
+    if action == Action::Remove {
+        return match fs::remove_file(&file) {
             Err(e) if e.kind() != io::ErrorKind::NotFound => Err(e),
             _ => Ok(()),
-        },
-        Action::Touch => {
-            // Only refresh a file that already exists: a subagent event must
-            // never invent a state for its parent.
-            let Ok(text) = fs::read_to_string(&file) else {
-                return Ok(());
-            };
-            let Ok(mut record) = serde_json::from_str::<Value>(&text) else {
-                return Ok(());
-            };
-            record["ts"] = json!(now_secs());
-            write_atomic(dir, &file, &record)
-        }
-        Action::Write { state, detail } => {
-            let cwd = input.get("cwd").and_then(Value::as_str).unwrap_or("");
-            let record = json!({
-                "session_id": session_id,
-                "project": state::file_name(cwd),
-                "cwd": cwd,
-                "state": state.as_str(),
-                "detail": detail,
-                "event": input.get("hook_event_name"),
-                "ts": now_secs(),
-            });
-            write_atomic(dir, &file, &record)
-        }
+        };
+    }
+    let prev = fs::read_to_string(&file)
+        .ok()
+        .and_then(|text| serde_json::from_str::<Value>(&text).ok());
+    match progress::merge(prev, input, &action, now_secs()) {
+        Some(record) => write_atomic(dir, &file, &record),
+        None => Ok(()),
     }
 }
 
