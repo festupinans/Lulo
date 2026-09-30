@@ -15,6 +15,7 @@
 #![cfg_attr(windows, windows_subsystem = "windows")]
 
 mod autostart;
+mod cloud;
 mod fonts;
 mod glass;
 mod island;
@@ -116,6 +117,13 @@ impl App {
         let watcher = dir
             .as_ref()
             .and_then(|d| watch(d, &dirty, cc.egui_ctx.clone()));
+        if let Some(d) = &dir {
+            if settings.cloud_sessions {
+                cloud::start(d.clone(), settings.forget_secs());
+            } else {
+                cloud::clear(d);
+            }
+        }
         fonts::install(&cc.egui_ctx);
         cc.egui_ctx.set_visuals(egui::Visuals::dark());
         glass::apply(cc);

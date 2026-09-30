@@ -14,6 +14,8 @@ pub struct Settings {
     pub inactive_minutes: u64,
     /// Hours without hook events before a session's file is deleted.
     pub forget_hours: u64,
+    /// Also shows the account's cloud sessions (claude.ai projects, the web).
+    pub cloud_sessions: bool,
 }
 
 impl Default for Settings {
@@ -22,6 +24,7 @@ impl Default for Settings {
             animate: true,
             inactive_minutes: 5,
             forget_hours: 12,
+            cloud_sessions: true,
         }
     }
 }
@@ -56,6 +59,9 @@ impl Settings {
         if let Some(h) = v.get("forget_hours").and_then(Value::as_u64) {
             s.forget_hours = h;
         }
+        if let Some(c) = v.get("cloud_sessions").and_then(Value::as_bool) {
+            s.cloud_sessions = c;
+        }
         s
     }
 
@@ -69,6 +75,7 @@ impl Settings {
             "animate": self.animate,
             "inactive_minutes": self.inactive_minutes,
             "forget_hours": self.forget_hours,
+            "cloud_sessions": self.cloud_sessions,
         });
         let _ = fs::write(path, serde_json::to_string_pretty(&v).unwrap_or_default());
     }
