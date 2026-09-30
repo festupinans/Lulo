@@ -600,8 +600,21 @@ impl<'a> Pen<'a> {
         if color.a() == 0 {
             return;
         }
-        self.painter
-            .add(Shape::convex_polygon(self.map(pts), color, Stroke::NONE));
+        // Repeated or nearly repeated vertices (where the arcs of a pill meet,
+        // or a squashed blink) break the anti-aliased edge into spikes.
+        let mut outline: Vec<Pos2> = Vec::with_capacity(pts.len());
+        for p in self.map(pts) {
+            if outline.last().is_none_or(|q| q.distance(p) > 0.05) {
+                outline.push(p);
+            }
+        }
+        while outline.len() > 1 && outline[0].distance(outline[outline.len() - 1]) <= 0.05 {
+            outline.pop();
+        }
+        if outline.len() >= 3 {
+            self.painter
+                .add(Shape::convex_polygon(outline, color, Stroke::NONE));
+        }
     }
 
     fn rrect(&self, x: f32, y: f32, w: f32, h: f32, r: f32, color: Color32) {
