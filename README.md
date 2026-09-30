@@ -30,7 +30,7 @@ Haz doble clic en `lulo-widget.exe`. Aparece como una media luna oscura pegada a
 - **Al pasar el ratón:** debajo de la luna aparece una ficha por sesión (pulpo, proyecto, estado y barra de tareas hechas), sin marco ni fondo. Se vuelve a plegar al sacar el ratón.
 - **El pulpo de cada ficha:** hace la escena de ese estado. Piensa, teclea frente al PC, mira la terminal, busca con lupa, llama a pulpitos ayudantes, espera impaciente, salta al terminar, tiembla con un error y duerme si no hay actividad.
 - **Segundo plano:** si Claude termina su turno pero dejó comandos o subagentes corriendo en segundo plano, la sesión sale «En segundo plano» en vez de «Terminó», hasta que Claude Code avisa que acabaron.
-- **Menú (clic derecho):** "Iniciar con Windows" y "Cerrar Lulo".
+- **Menú (clic derecho):** "Iniciar con Windows" y "Cerrar Lulo". Sobre una sesión inactiva, también "Quitar de la lista".
 - **Inactiva:** una sesión sin eventos durante 5 minutos pasa a "Inactiva" y baja al final. "Esperando" nunca pasa a inactiva, porque necesita que respondas.
 - **Sesiones huérfanas:** si cierras una terminal sin `/exit`, Claude Code no envía `SessionEnd`. El widget borra esos archivos tras 12 horas sin eventos.
 - **Consumo:** el pulpo se anima a 12 cuadros por segundo plegado y a 30 desplegado. Con `"animate": false` queda quieto y el widget solo se redibuja cuando cambia un archivo de estado o el ratón está encima, más un refresco cada 15 s para los tiempos.
