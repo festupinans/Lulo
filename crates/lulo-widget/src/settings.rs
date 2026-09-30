@@ -8,9 +8,6 @@ use serde_json::{json, Value};
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct Settings {
-    /// Windows acrylic blur behind the widget. Off falls back to a plain
-    /// translucent background.
-    pub glass: bool,
     /// Animates the octopus. Off draws it still and keeps the widget idle.
     pub animate: bool,
     /// Minutes without hook events before a session shows as "Inactiva".
@@ -25,7 +22,6 @@ pub struct Settings {
 impl Default for Settings {
     fn default() -> Self {
         Settings {
-            glass: true,
             animate: true,
             inactive_minutes: 5,
             forget_hours: 12,
@@ -55,9 +51,6 @@ impl Settings {
         let Ok(v) = serde_json::from_str::<Value>(text) else {
             return s;
         };
-        if let Some(g) = v.get("glass").and_then(Value::as_bool) {
-            s.glass = g;
-        }
         if let Some(a) = v.get("animate").and_then(Value::as_bool) {
             s.animate = a;
         }
@@ -80,7 +73,6 @@ impl Settings {
             let _ = fs::create_dir_all(dir);
         }
         let v = json!({
-            "glass": self.glass,
             "animate": self.animate,
             "inactive_minutes": self.inactive_minutes,
             "forget_hours": self.forget_hours,
@@ -113,8 +105,7 @@ mod tests {
     #[test]
     fn parses_with_defaults() {
         assert_eq!(Settings::parse("not json"), Settings::default());
-        let s = Settings::parse(r#"{"glass": false, "animate": false, "inactive_minutes": 2}"#);
-        assert!(!s.glass);
+        let s = Settings::parse(r#"{"animate": false, "inactive_minutes": 2}"#);
         assert!(!s.animate);
         assert!(s.account_usage);
         assert!(!Settings::parse(r#"{"account_usage": false}"#).account_usage);

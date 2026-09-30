@@ -5,7 +5,7 @@
 
 use std::f64::consts::TAU;
 
-use eframe::egui::{pos2, vec2, Color32, Painter, Pos2, Rect, Shape, Stroke};
+use eframe::egui::{pos2, vec2, Color32, Painter, Pos2, Rect, Shape, Stroke, Vec2};
 
 use crate::style;
 
@@ -84,6 +84,114 @@ pub fn paint(painter: &Painter, rect: Rect, state: &str, t: f64) {
         "error" => error(pen, t, c),
         "inactive" => sleeping(pen, t, c),
         _ => idle(pen, t, c),
+    }
+}
+
+/// The collapsed widget: a dark half moon hanging from the top edge of the
+/// screen, with the octopus upside down behind it so only the crown of its
+/// head and its eyes peek out. The eyes act out `state`. Designed on a
+/// 160×60 canvas (the mockup's), scaled to the width of `rect`.
+pub fn moon(painter: &Painter, rect: Rect, state: &str, t: f64) {
+    let k = rect.width() / MOON_SIZE.x;
+    let pen = Pen {
+        painter,
+        m: Affine::translate(rect.left(), rect.top()).then(Affine::scale(k, k)),
+    };
+    let c = style::look(state).color;
+    let (dx, dy) = match state {
+        "waiting" => (0., 2.2 * pulse(t, 0.5)),
+        "error" => (0.8 * (TAU * t / 0.35).sin() as f32, 0.),
+        "done" => (
+            0.,
+            3. * keys(phase(t, 1.2, 0.), &[(0., 0.), (0.4, 1.), (1., 0.)]),
+        ),
+        _ => (0., 1.2 * pulse(t, 2.4)),
+    };
+    let me = pen.with(Affine::translate(dx, dy));
+    head(
+        me.with(Affine::translate(49., 0.))
+            .with(Affine::scale(0.62, 0.62))
+            .with(Affine::about(50., 50., Affine::rotate(180.))),
+        c,
+    );
+    peek_eyes(me, state, t);
+
+    // The moon goes over the upper part of the head.
+    let edge = curve(
+        [152., 0.],
+        &[
+            [152., 21., 124., 31., 80., 31.],
+            [36., 31., 8., 21., 8., 0.],
+        ],
+    );
+    pen.fill(&edge, MOON);
+    pen.stroke(&edge, 0.9, Color32::from_white_alpha(28));
+}
+
+/// Size of the moon's design canvas.
+pub const MOON_SIZE: Vec2 = vec2(160., 60.);
+/// Height of the row of session dots on the moon's canvas.
+pub const MOON_DOTS_Y: f32 = 12.;
+const MOON: Color32 = Color32::from_rgb(21, 21, 28);
+
+/// Eyes drawn upright even though the head hangs upside down, so each state
+/// gets its own expression.
+fn peek_eyes(pen: Pen, state: &str, t: f64) {
+    const L: f32 = 73.8;
+    const R: f32 = 86.2;
+    const Y: f32 = 35.5;
+    match state {
+        "error" => {
+            for x in [L, R] {
+                pen.stroke(&[pos2(x - 1.8, Y - 1.8), pos2(x + 1.8, Y + 1.8)], 1.3, EYE);
+                pen.stroke(&[pos2(x + 1.8, Y - 1.8), pos2(x - 1.8, Y + 1.8)], 1.3, EYE);
+            }
+        }
+        "done" => {
+            for x in [L, R] {
+                let arc = curve(
+                    [x - 2., Y + 1.],
+                    &[quad([x - 2., Y + 1.], [x, Y - 2.4], [x + 2., Y + 1.])],
+                );
+                pen.stroke(&arc, 1.4, EYE);
+            }
+        }
+        "inactive" => {
+            for x in [L, R] {
+                pen.stroke(&[pos2(x - 2., Y), pos2(x + 2., Y)], 1.4, EYE);
+            }
+            let p = phase(t, 2.6, 0.);
+            let alpha = keys(p, &[(0., 0.), (0.3, 0.9), (1., 0.)]);
+            let z = pen.with(Affine::translate(95. + 4. * p, 40. + 6. * p));
+            let zig = [pos2(0., 0.), pos2(3.4, 0.), pos2(0., 3.4), pos2(3.4, 3.4)];
+            z.stroke(
+                &zig,
+                1.1,
+                style::look("inactive").color.gamma_multiply(alpha),
+            );
+        }
+        _ => {
+            // Waiting looks side to side; working looks down at its work.
+            let (dx, dy) = if state == "waiting" {
+                (
+                    1.6 * keys(
+                        phase(t, 1.6, 0.),
+                        &[(0., -1.), (0.35, -1.), (0.5, 1.), (0.85, 1.), (1., -1.)],
+                    ),
+                    0.,
+                )
+            } else {
+                (0., 1.)
+            };
+            let open = keys(
+                phase(t, 4., 0.),
+                &[(0., 1.), (0.9, 1.), (0.94, 0.1), (1., 1.)],
+            );
+            let eye = pen.with(Affine::about(80., Y + dy, Affine::scale(1., open)));
+            for x in [L, R] {
+                eye.rrect(x + dx - 1.65, Y - 2.9 + dy, 3.3, 5.8, 1.65, EYE);
+            }
+        }
     }
 }
 
@@ -738,6 +846,31 @@ mod tests {
         assert_eq!(keys(1., &k), 0.);
         assert!((phase(5.5, 2., 0.) - 0.75).abs() < 1e-6);
         assert!((phase(0.1, 1., 0.3) - 0.8).abs() < 1e-6);
+    }
+
+    #[test]
+    fn moon_paints_inside_its_box() {
+        let ctx = Context::default();
+        let painter = Painter::new(ctx, LayerId::background(), Rect::EVERYTHING);
+        let rect = Rect::from_min_size(pos2(0., 0.), MOON_SIZE);
+        for state in ["waiting", "error", "done", "inactive", "editing"] {
+            for t in [0., 0.3, 1.1] {
+                moon(&painter, rect, state, t);
+            }
+        }
+        let bounds = painter.ctx().graphics(|g| {
+            g.get(LayerId::background())
+                .map(|list| {
+                    list.all_entries()
+                        .map(|s| s.shape.visual_bounding_rect())
+                        .collect::<Vec<_>>()
+                })
+                .unwrap_or_default()
+        });
+        assert!(!bounds.is_empty());
+        for b in bounds {
+            assert!(rect.expand(1.).contains_rect(b), "{b:?}");
+        }
     }
 
     #[test]

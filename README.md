@@ -21,14 +21,12 @@ Desde una terminal también funcionan `lulo-hook.exe install`, `lulo-hook.exe un
 
 ## Abrir el widget
 
-Haz doble clic en `lulo-widget.exe`. Aparece como una isla de vidrio arriba en el centro de la pantalla, siempre encima y fuera de la barra de tareas.
+Haz doble clic en `lulo-widget.exe`. Aparece como una media luna oscura pegada al borde de arriba, en el centro de la pantalla, siempre encima y fuera de la barra de tareas.
 
-- **Plegada:** una píldora con el pulpo, una frase y un punto de color por sesión. La frase habla de lo que más te necesita: «api-server te espera», «docs tuvo un error», lo que hace la sesión más reciente («Lulo edita style.rs · 2 más»), «Todo listo» o «Sin actividad».
-- **El pulpo:** hace la escena de ese estado. Piensa, teclea frente al PC, mira la terminal, busca con lupa, llama a pulpitos ayudantes, espera impaciente, salta al terminar, tiembla con un error y duerme si no hay actividad.
-- **Al pasar el ratón:** la isla se abre con una ficha por sesión (pulpo, proyecto, estado y barra de tareas hechas) y debajo un resumen («3 trabajando · 1 te espera · 1 terminó»). Se vuelve a plegar al sacar el ratón.
-- **Al pasar sobre una ficha:** debajo aparece qué hace ahora y sus tareas como pasos (hechas, la actual resaltada y las que faltan). Si espera permiso, dice para qué. Si no usa tareas, muestra el pedido.
-- **Anillos de uso:** con la isla abierta, a la izquierda, dos anillos alrededor del pulpo. El de color es el uso que te queda en la ventana de 5 horas de tu plan (verde, ámbar desde la mitad, rojo y latiendo al final). El blanco, más fino, es el tiempo que falta para que se restablezca. Ver [Sobre los anillos de uso](#sobre-los-anillos-de-uso).
-- **Vidrio:** la isla dibuja su propio vidrio translúcido con bordes redondos suaves (el desenfoque acrylic de Windows rellenaba el rectángulo entero de la ventana). Con `"glass": false` en `widget.json` queda casi opaca.
+- **Plegada:** solo la media luna, sin texto. El pulpo cuelga de cabeza y asoma la coronilla y los ojos, y debajo hay un punto de color por cada sesión activa. Los ojos siguen a la sesión que más te necesita: miran a los lados si una espera, se vuelven X con un error, sonríen al terminar y se cierran si no hay actividad.
+- **Al pasar el ratón:** debajo de la luna aparecen los anillos de uso y una ficha por sesión (pulpo, proyecto, estado y barra de tareas hechas), sin marco ni fondo. Se vuelve a plegar al sacar el ratón.
+- **El pulpo de cada ficha:** hace la escena de ese estado. Piensa, teclea frente al PC, mira la terminal, busca con lupa, llama a pulpitos ayudantes, espera impaciente, salta al terminar, tiembla con un error y duerme si no hay actividad.
+- **Anillos de uso:** dos anillos alrededor del pulpo, a la izquierda de las fichas. El de color es el uso que te queda en la ventana de 5 horas de tu plan (verde, ámbar desde la mitad, rojo y latiendo al final). El blanco, más fino, es el tiempo que falta para que se restablezca. Ver [Sobre los anillos de uso](#sobre-los-anillos-de-uso).
 - **Segundo plano:** si Claude termina su turno pero dejó comandos o subagentes corriendo en segundo plano, la sesión sale «En segundo plano» en vez de «Terminó», hasta que Claude Code avisa que acabaron.
 - **Menú (clic derecho):** "Iniciar con Windows" y "Cerrar Lulo".
 - **Inactiva:** una sesión sin eventos durante 5 minutos pasa a "Inactiva" y baja al final. "Esperando" nunca pasa a inactiva, porque necesita que respondas.
@@ -38,7 +36,7 @@ Haz doble clic en `lulo-widget.exe`. Aparece como una isla de vidrio arriba en e
 La configuración está en `%LOCALAPPDATA%\Lulo\widget.json`:
 
 ```json
-{ "glass": true, "animate": true, "inactive_minutes": 5, "forget_hours": 12, "account_usage": true }
+{ "animate": true, "inactive_minutes": 5, "forget_hours": 12, "account_usage": true }
 ```
 
 ### Sobre los anillos de uso
@@ -48,11 +46,11 @@ Los hooks de Claude Code no traen el uso del plan. Lulo lo obtiene de dos formas
 - **Línea de estado (terminal):** la instalación pone `lulo-hook.exe statusline` como línea de estado en `settings.json`. Guarda el uso en `claude-status\_usage.json` y muestra en la terminal algo como `Opus · Lulo · 5 h: 34 % usado, reinicia en 2 h 10 min`. Si ya tenías una línea de estado propia, Lulo no la toca y te avisa.
 - **Tu cuenta (app de escritorio):** la app no ejecuta la línea de estado, así que el widget consulta el uso a Anthropic cada 5 minutos, igual que `/usage`. Para eso lee el acceso que Claude Code guarda en `~/.claude/.credentials.json`. El acceso solo se envía a Anthropic, nunca se guarda en otro sitio y Lulo no lo renueva: si caducó, espera a que Claude Code lo renueve. Esta consulta no está documentada por Anthropic y puede dejar de funcionar; en ese caso los anillos simplemente no aparecen. Se desactiva con `"account_usage": false` en `widget.json`. Usa el `curl` que trae Windows 10 y 11.
 
-Solo hay datos en los planes Pro y Max. Sin datos, la isla muestra solo las fichas. `lulo-hook.exe uninstall` quita también la línea de estado de Lulo.
+Solo hay datos en los planes Pro y Max. Sin datos, al abrir solo aparecen las fichas. `lulo-hook.exe uninstall` quita también la línea de estado de Lulo.
 
 ### Sobre la lista de tareas
 
-La lista sale de las herramientas de tareas de Claude Code (`TaskCreate`/`TaskUpdate`, o `TodoWrite` en versiones antiguas). En los modelos más nuevos Claude Code no las activa por defecto, así que la ficha muestra el pedido en lugar de las tareas. Para activarlas, arranca Claude Code con la variable de entorno `CLAUDE_CODE_ENABLE_TODO_TOOLS=1` (por ejemplo, `setx CLAUDE_CODE_ENABLE_TODO_TOOLS 1` en Windows y reinicia la terminal).
+La lista sale de las herramientas de tareas de Claude Code (`TaskCreate`/`TaskUpdate`, o `TodoWrite` en versiones antiguas). En los modelos más nuevos Claude Code no las activa por defecto, así que la barra de la ficha queda vacía hasta que la sesión termina. Para activarlas, arranca Claude Code con la variable de entorno `CLAUDE_CODE_ENABLE_TODO_TOOLS=1` (por ejemplo, `setx CLAUDE_CODE_ENABLE_TODO_TOOLS 1` en Windows y reinicia la terminal).
 
 ## Archivo de estado
 

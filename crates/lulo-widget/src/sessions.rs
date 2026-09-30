@@ -151,17 +151,6 @@ pub fn load(dir: &Path, now: u64, forget_secs: u64) -> Vec<Session> {
     sessions
 }
 
-/// "ahora", "5 min", "2 h": coarse on purpose so the window only needs to
-/// repaint every few seconds.
-pub fn ago(now: u64, ts: u64) -> String {
-    let secs = now.saturating_sub(ts);
-    match secs {
-        0..=59 => "ahora".into(),
-        60..=3599 => format!("{} min", secs / 60),
-        _ => format!("{} h", secs / 3600),
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -252,13 +241,5 @@ mod tests {
         s.state = "waiting".into();
         assert_eq!(s.shown_state(5000, 300), "waiting");
         assert_eq!(label("inactive"), "Inactiva");
-    }
-
-    #[test]
-    fn ago_is_coarse() {
-        assert_eq!(ago(100, 100), "ahora");
-        assert_eq!(ago(100, 200), "ahora");
-        assert_eq!(ago(400, 100), "5 min");
-        assert_eq!(ago(7300, 100), "2 h");
     }
 }

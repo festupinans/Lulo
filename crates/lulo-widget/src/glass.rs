@@ -1,9 +1,5 @@
-//! Keeps Windows from framing the widget. The window is transparent and the
-//! island draws its own translucent glass, so its rounded edges stay smooth.
-//!
-//! The system acrylic blur is not used: Windows fills the whole window
-//! rectangle with it, ignoring the island's shape, and on some systems it
-//! shows as a flat gray instead of a blur.
+//! Keeps Windows from framing the widget. The window is transparent and
+//! only the moon, the rings and the chips are drawn, so nothing else shows.
 
 #[cfg(windows)]
 pub fn apply(window: &impl raw_window_handle::HasWindowHandle) {
