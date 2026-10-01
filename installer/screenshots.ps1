@@ -1,6 +1,6 @@
 <#
 CI only: clicks through the installer in Spanish and saves a screenshot of
-each page (and of the widget it opens) for reviewing changes. Uninstalls
+each page for reviewing changes. Uninstalls
 afterwards so test-install.ps1 starts clean.
 
 Usage: screenshots.ps1 Lulo-Setup.exe <output folder>
@@ -37,9 +37,8 @@ Shot '1-tareas'
 Press '{ENTER}' $title          # Siguiente: installs (no Ready page)
 Start-Sleep 8
 Shot '2-terminado'
-Press '{ENTER}' $title          # Finalizar: opens the widget
-Start-Sleep 4
-Shot '3-widget'
+Press '{ENTER}' $title          # Finalizar
+Start-Sleep 2
 
 Stop-Process -Name lulo-widget -ErrorAction SilentlyContinue
 $unins = Join-Path $env:LOCALAPPDATA 'Lulo\unins000.exe'
