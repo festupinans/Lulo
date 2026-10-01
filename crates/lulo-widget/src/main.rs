@@ -80,7 +80,12 @@ fn main() -> eframe::Result {
         // Out of the taskbar and Alt+Tab, and don't steal focus on launch.
         .with_taskbar(false)
         .with_active(false)
-        .with_resizable(false);
+        .with_resizable(false)
+        .with_icon(egui::IconData {
+            rgba: include_bytes!("../../../assets/lulo-64.rgba").to_vec(),
+            width: 64,
+            height: 64,
+        });
     let options = eframe::NativeOptions {
         viewport,
         ..Default::default()

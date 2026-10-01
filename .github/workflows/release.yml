@@ -1,10 +1,19 @@
 name: Release
 
-# Builds the Windows binaries and publishes them as a GitHub release.
-# Runs when a version tag (v0.1.0, ...) is pushed, or by hand with a tag name.
+# Builds the Windows binaries and the installer, and publishes them as a
+# GitHub release. Runs when a version tag (v0.1.0, ...) is pushed, or by hand
+# with a tag name. On pull requests that touch the installer it builds and
+# tests everything but publishes nothing.
+#
+# Signing turns on by itself once the ARTIFACT_SIGNING_* and AZURE_* secrets
+# exist (see installer/README.md). Without them the build is unsigned.
 on:
   push:
     tags: ["v*"]
+  pull_request:
+    paths:
+      - "installer/**"
+      - ".github/workflows/release.yml"
   workflow_dispatch:
     inputs:
       tag:
@@ -20,21 +29,101 @@ jobs:
     env:
       TAG: ${{ github.event.inputs.tag || github.ref_name }}
       GH_TOKEN: ${{ github.token }}
+      SIGNING: ${{ secrets.ARTIFACT_SIGNING_ENDPOINT != '' }}
+      ARTIFACT_SIGNING_ENDPOINT: ${{ secrets.ARTIFACT_SIGNING_ENDPOINT }}
+      ARTIFACT_SIGNING_ACCOUNT: ${{ secrets.ARTIFACT_SIGNING_ACCOUNT }}
+      ARTIFACT_SIGNING_PROFILE: ${{ secrets.ARTIFACT_SIGNING_PROFILE }}
+      AZURE_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
+      AZURE_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
+      AZURE_CLIENT_SECRET: ${{ secrets.AZURE_CLIENT_SECRET }}
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
       - run: cargo build --release
+
+      - name: Version
+        shell: pwsh
+        run: |
+          if ($env:GITHUB_EVENT_NAME -eq 'pull_request') {
+            $v = (Select-String -Path crates/lulo-widget/Cargo.toml -Pattern '^version = "(.+)"').Matches[0].Groups[1].Value
+          } else {
+            $v = $env:TAG -replace '^v', ''
+          }
+          "VERSION=$v" | Out-File -FilePath $env:GITHUB_ENV -Append
+
+      - name: Install signing module
+        if: env.SIGNING == 'true'
+        shell: pwsh
+        run: Install-Module -Name ArtifactSigning -Scope CurrentUser -Force -Repository PSGallery
+
+      - name: Sign binaries
+        if: env.SIGNING == 'true'
+        shell: pwsh
+        run: ./installer/sign.ps1 target/release/lulo-hook.exe target/release/lulo-widget.exe
+
+      - name: Install Inno Setup
+        shell: pwsh
+        run: |
+          $iscc = "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe"
+          if (-not (Test-Path $iscc)) {
+            choco install innosetup --no-progress -y
+            if ($LASTEXITCODE -ne 0) { throw 'choco install innosetup failed' }
+          }
+          "ISCC=$iscc" | Out-File -FilePath $env:GITHUB_ENV -Append
+
+      - name: Build installer
+        shell: pwsh
+        run: |
+          $isccArgs = @("/DAppVersion=$env:VERSION")
+          if ($env:SIGNING -eq 'true') {
+            $sign = Join-Path $PWD 'installer\sign.ps1'
+            # $q and $f are Inno Setup's quote and file placeholders.
+            $isccArgs += '/DSign', "/Slulo=pwsh -NoProfile -File `$q$sign`$q `$f"
+          }
+          & $env:ISCC @isccArgs installer/lulo.iss
+          if ($LASTEXITCODE -ne 0) { throw 'Inno Setup failed' }
+          Copy-Item "target/installer/Lulo-Setup-$env:VERSION.exe" Lulo-Setup.exe
+
+      - name: Check signatures
+        if: env.SIGNING == 'true'
+        shell: pwsh
+        run: |
+          foreach ($f in 'target/release/lulo-hook.exe', 'target/release/lulo-widget.exe', 'Lulo-Setup.exe') {
+            $s = Get-AuthenticodeSignature $f
+            "{0}: {1} ({2})" -f $f, $s.Status, $s.SignerCertificate.Subject
+            if ($s.Status -ne 'Valid') { throw "$f is not signed correctly" }
+          }
+
+      - name: Screenshot the installer
+        continue-on-error: true
+        shell: pwsh
+        run: ./installer/screenshots.ps1 Lulo-Setup.exe installer-screenshots
+
+      - name: Test install and uninstall
+        shell: pwsh
+        run: ./installer/test-install.ps1 Lulo-Setup.exe
+
       - name: Package
         shell: pwsh
         run: |
           Copy-Item target/release/lulo-hook.exe, target/release/lulo-widget.exe .
           Compress-Archive -Path lulo-hook.exe, lulo-widget.exe, INSTALACION.md -DestinationPath lulo-windows-x64.zip
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: lulo-${{ env.VERSION }}
+          path: |
+            Lulo-Setup.exe
+            lulo-windows-x64.zip
+            installer-screenshots/
+
       - name: Publish
+        if: github.event_name != 'pull_request'
         shell: bash
         run: >
           gh release create "$TAG"
           --target "$GITHUB_SHA"
           --title "Lulo $TAG"
           --notes-file .github/release-notes.md
-          lulo-windows-x64.zip lulo-hook.exe lulo-widget.exe
+          Lulo-Setup.exe lulo-windows-x64.zip lulo-hook.exe lulo-widget.exe

@@ -15,6 +15,10 @@ Funciona con [hooks de Claude Code](https://code.claude.com/docs/en/hooks): cada
 
 ## Instalar el hook
 
+La forma más fácil es `Lulo-Setup.exe` de la [última versión](https://github.com/festupinans/Lulo/releases/latest): hace los pasos de abajo y deja Lulo en Configuración > Aplicaciones para desinstalarlo. Cómo se compila y se firma está en [installer/README.md](installer/README.md).
+
+A mano:
+
 1. Descarga `lulo-windows-x64.zip` de la [última versión](https://github.com/festupinans/Lulo/releases/latest) (trae `lulo-hook.exe` y `lulo-widget.exe`) o compílalos con `cargo build --release`.
 2. Haz doble clic en `lulo-hook.exe`. Se copia a `%LOCALAPPDATA%\Lulo\lulo-hook.exe` y añade los hooks a `~/.claude/settings.json` sin tocar el resto del archivo, guardando antes una copia (`settings.json.lulo-backup-<fecha>`). Puedes repetirlo cuando quieras: nunca duplica entradas. Si `lulo-widget.exe` está en la misma carpeta, también lo copia y lo abre.
 3. Reinicia las sesiones de Claude Code abiertas para que carguen los hooks.
