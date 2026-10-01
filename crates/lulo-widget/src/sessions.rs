@@ -19,6 +19,12 @@ pub struct Session {
     pub tasks: Vec<Task>,
     /// Shells and subagents still running in the background.
     pub background: usize,
+    /// Unix seconds when the current state began (newer hooks only).
+    pub since: Option<u64>,
+    /// Unix seconds when the last prompt was sent.
+    pub started: Option<u64>,
+    /// The Claude Code process, to bring its window to the front.
+    pub claude_pid: Option<u32>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -54,6 +60,12 @@ impl Session {
                 })
                 .collect(),
             background: array(&v, "background").count(),
+            since: v.get("since").and_then(Value::as_u64),
+            started: v.get("started").and_then(Value::as_u64),
+            claude_pid: v
+                .get("claude_pid")
+                .and_then(Value::as_u64)
+                .and_then(|p| u32::try_from(p).ok()),
         })
     }
 
@@ -82,6 +94,30 @@ impl Session {
         } else {
             &self.state
         }
+    }
+}
+
+impl Session {
+    /// Seconds the session has been in its shown state. Busy states count
+    /// from the prompt, since thinking and tools alternate all through a
+    /// turn; "inactive" counts from the last event.
+    pub fn elapsed(&self, shown: &str, now: u64) -> Option<u64> {
+        let from = match shown {
+            "inactive" => Some(self.ts),
+            s if BUSY_STATES.contains(&s) && s != "background" => self.started.or(self.since),
+            _ => self.since,
+        }?;
+        (from > 0).then(|| now.saturating_sub(from))
+    }
+}
+
+/// Short Spanish duration: "ahora", "4 min", "1 h 12".
+pub fn duration(secs: u64) -> String {
+    match secs {
+        0..60 => "ahora".into(),
+        60..3600 => format!("{} min", secs / 60),
+        _ if secs % 3600 < 60 => format!("{} h", secs / 3600),
+        _ => format!("{} h {:02}", secs / 3600, secs % 3600 / 60),
     }
 }
 
@@ -218,6 +254,23 @@ mod tests {
         assert_eq!(s.prompt.as_deref(), Some("Arregla el login"));
         assert_eq!(s.tasks[2].status, "pending");
         assert_eq!(s.task_counts(), (1, 3));
+    }
+
+    #[test]
+    fn elapsed_time_per_state() {
+        let mut s = Session::parse(
+            r#"{"session_id":"a","state":"waiting","ts":90,"since":80,"started":20}"#,
+        )
+        .unwrap();
+        assert_eq!(s.elapsed("waiting", 100), Some(20));
+        assert_eq!(s.elapsed("bash", 100), Some(80));
+        assert_eq!(s.elapsed("inactive", 100), Some(10));
+        s.since = None;
+        assert_eq!(s.elapsed("done", 100), None);
+        assert_eq!(duration(59), "ahora");
+        assert_eq!(duration(4 * 60 + 5), "4 min");
+        assert_eq!(duration(3600 + 12 * 60), "1 h 12");
+        assert_eq!(duration(2 * 3600 + 30), "2 h");
     }
 
     #[test]

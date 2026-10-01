@@ -73,6 +73,8 @@ const MENU_ROOM: Vec2 = vec2(190.0, 110.0);
 /// Solid backgrounds for the chips.
 const SOLID: Color32 = Color32::from_rgb(23, 23, 30);
 const SOLID_HOVER: Color32 = Color32::from_rgb(40, 40, 52);
+/// The time next to the state on a chip.
+const MUTED: Color32 = Color32::from_rgb(154, 154, 174);
 
 fn main() -> eframe::Result {
     let settings = Settings::load();
@@ -294,7 +296,7 @@ impl eframe::App for App {
         };
 
         if open {
-            size = self.draw_open(ui, full.min, moon, &rows, t);
+            size = self.draw_open(ui, full.min, moon, &rows, t, now);
         } else {
             // The yo-yo hangs below the moon's usual canvas.
             size.y = moon.y * act.canvas_height() / octopus::MOON_SIZE.y;
@@ -388,6 +390,7 @@ impl App {
         moon: Vec2,
         rows: &[(&Session, &str)],
         t: f64,
+        now: u64,
     ) -> Vec2 {
         let cols = rows.len().clamp(1, COLUMNS);
         let lines = rows.len().div_ceil(COLUMNS);
@@ -431,7 +434,7 @@ impl App {
                 });
             }
             let on = hovered.as_deref() == Some(s.id.as_str());
-            draw_chip(ui.painter(), chip, s, st, on, t);
+            draw_chip(ui.painter(), chip, s, st, on, t, now);
         }
         self.hovered = hovered;
         if let (Some(id), Some(dir)) = (forget, &self.dir) {
@@ -444,7 +447,7 @@ impl App {
 }
 
 /// One session: its octopus, name, state and task progress.
-fn draw_chip(painter: &Painter, rect: Rect, s: &Session, state: &str, on: bool, t: f64) {
+fn draw_chip(painter: &Painter, rect: Rect, s: &Session, state: &str, on: bool, t: f64, now: u64) {
     painter.rect(
         rect,
         CornerRadius::same(14),
@@ -465,12 +468,20 @@ fn draw_chip(painter: &Painter, rect: Rect, s: &Session, state: &str, on: bool, 
         Color32::WHITE,
         text_w,
     ));
-    let label = painter.layout_job(one_line(
+    let mut label = one_line(
         sessions::label(state),
         fonts::semibold(11.5),
         look.color,
         text_w,
-    ));
+    );
+    if let Some(secs) = s.elapsed(state, now) {
+        label.append(
+            &format!(" · {}", sessions::duration(secs)),
+            0.0,
+            TextFormat::simple(FontId::proportional(11.5), MUTED),
+        );
+    }
+    let label = painter.layout_job(label);
     let block = name.size().y + label.size().y;
     let y = mascot.center().y - block / 2.0;
     let name_h = name.size().y;
