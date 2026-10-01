@@ -14,8 +14,12 @@
 // No console window behind the widget on Windows.
 #![cfg_attr(windows, windows_subsystem = "windows")]
 
+mod alert;
 mod autostart;
+mod changes;
 mod cursor;
+mod display;
+mod focus;
 mod fonts;
 mod glass;
 mod island;
@@ -36,6 +40,7 @@ use eframe::egui::{
 };
 use notify::{RecursiveMode, Watcher};
 
+use display::Anchor;
 use octopus::Act;
 use sessions::Session;
 use settings::Settings;
@@ -69,7 +74,9 @@ const NEAR_MOUSE: f32 = 260.0;
 /// Height of the eyes on the moon's canvas.
 const MOON_EYES_Y: f32 = 35.5;
 /// Window size needed while the right-click menu is open.
-const MENU_ROOM: Vec2 = vec2(190.0, 110.0);
+const MENU_ROOM: Vec2 = vec2(360.0, 230.0);
+/// How often to check for something full screen.
+const FULLSCREEN_POLL: Duration = Duration::from_secs(2);
 /// Solid backgrounds for the chips.
 const SOLID: Color32 = Color32::from_rgb(23, 23, 30);
 const SOLID_HOVER: Color32 = Color32::from_rgb(40, 40, 52);
@@ -122,6 +129,13 @@ struct App {
     hovered: Option<String>,
     geometry: Option<(Pos2, Vec2)>,
     mood: mood::Mood,
+    watch: changes::Watch,
+    alerts: alert::Alerts,
+    /// Monitors, re-read with the session files.
+    monitors: Vec<display::Monitor>,
+    /// Something full screen has the screen, and when that was checked.
+    fullscreen: bool,
+    fullscreen_at: Option<Instant>,
 }
 
 impl App {
@@ -134,6 +148,7 @@ impl App {
         fonts::install(&cc.egui_ctx);
         cc.egui_ctx.set_visuals(egui::Visuals::dark());
         glass::apply(cc);
+        alert::register();
         App {
             dir,
             sessions: Vec::new(),
@@ -147,6 +162,11 @@ impl App {
             hovered: None,
             geometry: None,
             mood: mood::Mood::default(),
+            watch: changes::Watch::default(),
+            alerts: alert::Alerts::start(),
+            monitors: display::monitors(),
+            fullscreen: false,
+            fullscreen_at: None,
         }
     }
 
@@ -168,13 +188,30 @@ impl App {
         }
     }
 
-    /// Centers the window at the top of the screen.
+    /// Sticks the window to the top edge of the chosen monitor, at the
+    /// chosen side.
     fn place_window(&mut self, ctx: &egui::Context, size: Vec2) {
-        let screen = ctx
-            .input(|i| i.viewport().monitor_size)
-            .unwrap_or(vec2(1920.0, 1080.0));
         let size = size.round();
-        let pos = pos2(((screen.x - size.x) / 2.0).max(0.0), 0.0).round();
+        let s = &self.settings;
+        let pos = match display::pick(&self.monitors, Some(s.monitor)) {
+            Some(m) => {
+                let size_px = (size.x * m.scale, size.y * m.scale);
+                let (x, y) = display::place(&self.monitors, Some(s.monitor), s.anchor, size_px)
+                    .unwrap_or_default();
+                // egui turns points into pixels with the scale of the
+                // monitor the window is on now; once it lands on another,
+                // the next frame places it again with that one's scale.
+                let ppp = ctx.pixels_per_point();
+                pos2(x / ppp, y / ppp).round()
+            }
+            // No monitor list off Windows: center on the current screen.
+            None => {
+                let screen = ctx
+                    .input(|i| i.viewport().monitor_size)
+                    .unwrap_or(vec2(1920.0, 1080.0));
+                pos2(((screen.x - size.x) / 2.0).max(0.0), 0.0).round()
+            }
+        };
         if self.geometry != Some((pos, size)) {
             ctx.send_viewport_cmd(egui::ViewportCommand::InnerSize(size));
             ctx.send_viewport_cmd(egui::ViewportCommand::OuterPosition(pos));
@@ -182,7 +219,25 @@ impl App {
         }
     }
 
-    /// The right-click menu: autostart and close.
+    /// Toasts and sounds for the sessions that just changed.
+    fn alert(&mut self, now: u64) {
+        let inactive_secs = self.settings.inactive_secs();
+        let rows: Vec<(&Session, &str)> = self
+            .sessions
+            .iter()
+            .map(|s| (s, s.shown_state(now, inactive_secs)))
+            .collect();
+        let events = self.watch.update(&rows);
+        let s = &self.settings;
+        let options = alert::Options {
+            toasts: s.notifications,
+            sounds: s.sounds,
+            new_session_sound: s.new_session_sound,
+        };
+        self.alerts.send(events, options);
+    }
+
+    /// The right-click menu: autostart, alerts and close.
     fn menu(&mut self, ui: &mut egui::Ui) {
         if autostart::SUPPORTED
             && ui
@@ -192,6 +247,38 @@ impl App {
             autostart::set(self.autostart);
             self.autostart = autostart::is_enabled();
         }
+        let s = &mut self.settings;
+        let mut changed = ui
+            .checkbox(&mut s.notifications, "Avisos de Windows")
+            .changed();
+        changed |= ui.checkbox(&mut s.sounds, "Sonidos").changed();
+        changed |= ui
+            .checkbox(&mut s.hide_fullscreen, "Esconder en pantalla completa")
+            .changed();
+        if self.monitors.len() > 1 {
+            ui.menu_button("Pantalla", |ui| {
+                for i in 0..self.monitors.len() {
+                    let name = if self.monitors[i].primary {
+                        format!("Pantalla {} (principal)", i + 1)
+                    } else {
+                        format!("Pantalla {}", i + 1)
+                    };
+                    changed |= ui.radio_value(&mut s.monitor, i, name).changed();
+                }
+            });
+        }
+        ui.menu_button("Posición", |ui| {
+            for (anchor, name) in [
+                (Anchor::Left, "Izquierda"),
+                (Anchor::Center, "Centro"),
+                (Anchor::Right, "Derecha"),
+            ] {
+                changed |= ui.radio_value(&mut s.anchor, anchor, name).changed();
+            }
+        });
+        if changed {
+            s.save();
+        }
         if ui.button("Cerrar Lulo").clicked() {
             ui.ctx().send_viewport_cmd(egui::ViewportCommand::Close);
         }
@@ -199,7 +286,12 @@ impl App {
 
     /// Next frame for the animation, or just the slow tick when it is off.
     fn schedule_repaint(&self, ctx: &egui::Context, frame: Duration) {
-        ctx.request_repaint_after(if self.settings.animate { frame } else { TICK });
+        let idle = if self.settings.hide_fullscreen {
+            FULLSCREEN_POLL
+        } else {
+            TICK
+        };
+        ctx.request_repaint_after(if self.settings.animate { frame } else { idle });
     }
 }
 
@@ -239,8 +331,18 @@ impl eframe::App for App {
         if self.dirty.swap(false, Ordering::Relaxed) || stale {
             if let Some(dir) = &self.dir {
                 self.sessions = sessions::load(dir, now, self.settings.forget_secs());
+                self.alert(now);
             }
+            self.monitors = display::monitors();
             self.last_load = Some(Instant::now());
+        }
+        if self.settings.hide_fullscreen
+            && self
+                .fullscreen_at
+                .is_none_or(|t| t.elapsed() >= FULLSCREEN_POLL)
+        {
+            self.fullscreen = display::busy_fullscreen();
+            self.fullscreen_at = Some(Instant::now());
         }
         self.update_expanded(&ctx);
         // Still octopus when animations are off: a fixed moment of each scene.
@@ -265,6 +367,21 @@ impl eframe::App for App {
             .any(|(s, _)| Some(&s.id) == self.hovered.as_ref())
         {
             self.hovered = None;
+        }
+
+        // Out of the way of a video, game or presentation, unless a session
+        // needs you. The window stays (a hidden one stops getting frames, and
+        // this check with it), shrunk to one transparent pixel.
+        let needs_you = rows
+            .iter()
+            .any(|(_, st)| matches!(*st, "waiting" | "error"));
+        if self.settings.hide_fullscreen && self.fullscreen && !needs_you {
+            self.expanded = false;
+            self.place_window(&ctx, vec2(1.0, 1.0));
+            ctx.request_repaint_after(FULLSCREEN_POLL);
+            drop(rows);
+            self.sessions = sessions;
+            return;
         }
 
         ui.visuals_mut().override_text_color = Some(Color32::WHITE);
@@ -412,27 +529,24 @@ impl App {
                 ),
                 vec2(CHIP_W, CHIP_H),
             );
-            // Inactive chips take the right click to offer leaving the list;
-            // the others let it through to the general menu.
-            let inactive = *st == "inactive";
-            let sense = if inactive {
-                Sense::click()
-            } else {
-                Sense::hover()
-            };
-            let response = ui.interact(chip, ui.id().with(("chip", &s.id)), sense);
+            // A click brings the session's window to the front. The right
+            // click opens the menu, which also offers to drop inactive ones.
+            let response = ui.interact(chip, ui.id().with(("chip", &s.id)), Sense::click());
             if response.hovered() {
                 hovered = Some(s.id.clone());
             }
-            if inactive {
-                response.context_menu(|ui| {
+            if response.clicked() {
+                focus::bring_to_front(s.claude_pid);
+            }
+            response.context_menu(|ui| {
+                if *st == "inactive" {
                     if ui.button("Quitar de la lista").clicked() {
                         forget = Some(s.id.clone());
                     }
                     ui.separator();
-                    self.menu(ui);
-                });
-            }
+                }
+                self.menu(ui);
+            });
             let on = hovered.as_deref() == Some(s.id.as_str());
             draw_chip(ui.painter(), chip, s, st, on, t, now);
         }

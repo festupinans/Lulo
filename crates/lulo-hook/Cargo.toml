@@ -1,6 +1,6 @@
 [package]
 name = "lulo-hook"
-version = "0.2.0"
+version = "0.3.0"
 description = "Claude Code hook that records each session's live state for the Lulo widget"
 edition.workspace = true
 repository.workspace = true

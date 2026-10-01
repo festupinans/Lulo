@@ -80,11 +80,14 @@ Source: "{#BinDir}\lulo-hook.exe"; DestDir: "{app}"; Flags: ignoreversion
 Source: "{#BinDir}\lulo-widget.exe"; DestDir: "{app}"; Flags: ignoreversion
 
 [Icons]
-Name: "{autoprograms}\Lulo"; Filename: "{app}\lulo-widget.exe"
+; The same id the widget gives its notifications (alert.rs APP_ID).
+Name: "{autoprograms}\Lulo"; Filename: "{app}\lulo-widget.exe"; AppUserModelID: "Lulo.Widget"
 
 [Registry]
 ; Same value the widget's "Iniciar con Windows" menu item reads and writes.
 Root: HKCU; Subkey: "Software\Microsoft\Windows\CurrentVersion\Run"; ValueType: string; ValueName: "Lulo"; ValueData: """{app}\lulo-widget.exe"""; Tasks: autostart
+; Name and icon of Lulo's notifications; the widget fills it in on start.
+Root: HKCU; Subkey: "Software\Classes\AppUserModelId\Lulo.Widget"; Flags: uninsdeletekey
 
 [Run]
 Filename: "{app}\lulo-widget.exe"; Description: "{cm:LaunchWidget}"; Flags: nowait postinstall skipifsilent
@@ -94,6 +97,7 @@ Filename: "{app}\lulo-hook.exe"; Parameters: "uninstall"; Flags: runhidden; RunO
 
 [UninstallDelete]
 Type: files; Name: "{app}\widget.json"
+Type: files; Name: "{app}\lulo.ico"
 Type: filesandordirs; Name: "{localappdata}\claude-status"
 
 [Code]
