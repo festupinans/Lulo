@@ -30,10 +30,14 @@ pub fn merge(prev: Option<Value>, input: &Value, action: &Action, now: u64) -> O
     let tasks_changed = update_tasks(&mut rec, input) | update_background(&mut rec, input);
     match action {
         Action::Write { state, detail } => {
-            let cwd = str_field(input, "cwd").unwrap_or("");
             rec.insert("session_id".into(), json!(str_field(input, "session_id")));
-            rec.insert("project".into(), json!(state::file_name(cwd)));
-            rec.insert("cwd".into(), json!(cwd));
+            // Each event carries the shell's current folder, which follows a
+            // `cd`. The project is the folder the session started in.
+            if !rec.contains_key("cwd") {
+                let cwd = str_field(input, "cwd").unwrap_or("");
+                rec.insert("project".into(), json!(state::file_name(cwd)));
+                rec.insert("cwd".into(), json!(cwd));
+            }
             rec.insert("state".into(), json!(state.as_str()));
             rec.insert("detail".into(), json!(detail));
             // The turn ended but shells or subagents it launched still run:
@@ -242,8 +246,59 @@ fn clip(s: &str) -> String {
 }
 
 fn clip_prompt(s: &str) -> String {
-    let joined = s.split_whitespace().collect::<Vec<_>>().join(" ");
+    let text = unwrap_envelope(s);
+    let joined = text.split_whitespace().collect::<Vec<_>>().join(" ");
     clip_to(&joined, PROMPT_MAX_CHARS)
+}
+
+/// Sessions driven from a claude.ai project thread receive the person's
+/// message wrapped in markup (`<wake>…<message>text</message>…</wake>`, or a
+/// `<relay>…<note>text</note>` brief). Keeps only the text a person wrote.
+fn unwrap_envelope(s: &str) -> String {
+    let trimmed = s.trim_start();
+    if !trimmed.starts_with('<') {
+        return s.to_string();
+    }
+    let inner = last_element(trimmed, "message")
+        .or_else(|| last_element(trimmed, "note"))
+        .unwrap_or(trimmed);
+    unescape(&strip_tags(inner))
+}
+
+/// Content of the last `<name …>…</name>` element in `s`.
+fn last_element<'a>(s: &'a str, name: &str) -> Option<&'a str> {
+    let close = format!("</{name}>");
+    let end = s.rfind(&close)?;
+    let open = s[..end].rfind(&format!("<{name}"))?;
+    let body = open + s[open..end].find('>')? + 1;
+    Some(&s[body..end])
+}
+
+fn strip_tags(s: &str) -> String {
+    let mut out = String::with_capacity(s.len());
+    let mut in_tag = false;
+    for c in s.chars() {
+        match c {
+            '<' => in_tag = true,
+            '>' if in_tag => {
+                in_tag = false;
+                out.push(' ');
+            }
+            _ if !in_tag => out.push(c),
+            _ => {}
+        }
+    }
+    out
+}
+
+fn unescape(s: &str) -> String {
+    s.replace("&lt;", "<")
+        .replace("&gt;", ">")
+        .replace("&quot;", "\"")
+        .replace("&#34;", "\"")
+        .replace("&#39;", "'")
+        .replace("&apos;", "'")
+        .replace("&amp;", "&")
 }
 
 fn clip_to(s: &str, max: usize) -> String {
@@ -530,6 +585,44 @@ mod tests {
         );
         let r = step(r, ev("Stop", json!({})), 4).unwrap();
         assert_eq!(r["state"], "done");
+    }
+
+    #[test]
+    fn project_stays_on_the_starting_folder() {
+        let r = step(None, ev("UserPromptSubmit", json!({ "prompt": "x" })), 1).unwrap();
+        let mut bash = ev(
+            "PreToolUse",
+            json!({ "tool_name": "Bash", "tool_input": {} }),
+        );
+        bash["cwd"] = json!("/w/Lulo/crates/src");
+        let r = step(Some(r), bash, 2).unwrap();
+        assert_eq!(
+            (r["project"].as_str(), r["cwd"].as_str()),
+            (Some("Lulo"), Some("/w/Lulo"))
+        );
+
+        let mut start = ev("SessionStart", json!({}));
+        start["cwd"] = json!("/w/Other");
+        let r = step(Some(r), start, 3).unwrap();
+        assert_eq!(r["project"], "Other");
+    }
+
+    #[test]
+    fn project_thread_prompts_keep_only_the_message() {
+        let prompt = |p: &str| {
+            let r = step(None, ev("UserPromptSubmit", json!({ "prompt": p })), 1).unwrap();
+            r["prompt"].as_str().unwrap().to_string()
+        };
+        let wake = r#"<wake reason="mention"> <project id="p"> <thread ts="t">
+            <message trigger="true" from="human" id="m1">Aplica los cambios &#34;ya&#34;</message>
+            </thread> </project> </wake>"#;
+        assert_eq!(prompt(wake), "Aplica los cambios \"ya\"");
+
+        let relay = r#"<relay from="coordinator" session="s"> The note below was written by
+            the coordinator. <note> Diagnostic audit of Lulo&#39;s hooks </note> </relay>"#;
+        assert_eq!(prompt(relay), "Diagnostic audit of Lulo's hooks");
+
+        assert_eq!(prompt("usa <b>negrita</b>"), "usa <b>negrita</b>");
     }
 
     #[test]

@@ -69,15 +69,34 @@ impl Session {
 
     /// The state to show: any state except "waiting" turns "inactive" after
     /// `inactive_secs` without hook events. Waiting stays visible because it
-    /// needs the user.
+    /// needs the user. A session mid-turn sends nothing while a long command
+    /// or a long thought runs, so busy states get at least `BUSY_GRACE_SECS`.
     pub fn shown_state(&self, now: u64, inactive_secs: u64) -> &str {
-        if self.state != "waiting" && now.saturating_sub(self.ts) >= inactive_secs {
+        let limit = if BUSY_STATES.contains(&self.state.as_str()) {
+            inactive_secs.max(BUSY_GRACE_SECS)
+        } else {
+            inactive_secs
+        };
+        if self.state != "waiting" && now.saturating_sub(self.ts) >= limit {
             "inactive"
         } else {
             &self.state
         }
     }
 }
+
+/// States of a session in the middle of a turn.
+const BUSY_STATES: &[&str] = &[
+    "thinking",
+    "editing",
+    "bash",
+    "reading",
+    "subagent",
+    "tool",
+    "background",
+];
+/// Longer than Claude Code's 10-minute cap on a foreground Bash command.
+const BUSY_GRACE_SECS: u64 = 20 * 60;
 
 fn array<'a>(v: &'a Value, key: &str) -> impl Iterator<Item = &'a Value> {
     v.get(key).and_then(Value::as_array).into_iter().flatten()
@@ -188,6 +207,17 @@ mod tests {
     }
 
     #[test]
+    fn busy_sessions_get_a_longer_grace() {
+        let mut s = Session::parse(r#"{"session_id":"a","state":"bash","ts":0}"#).unwrap();
+        assert_eq!(s.shown_state(600, 300), "bash");
+        assert_eq!(s.shown_state(BUSY_GRACE_SECS, 300), "inactive");
+        s.state = "done".into();
+        assert_eq!(s.shown_state(300, 300), "inactive");
+        s.state = "ready".into();
+        assert_eq!(s.shown_state(300, 300), "inactive");
+    }
+
+    #[test]
     fn loads_json_files_newest_first() {
         let dir = std::env::temp_dir().join(format!("lulo-widget-test-{}", std::process::id()));
         let _ = fs::remove_dir_all(&dir);
@@ -233,10 +263,10 @@ mod tests {
 
     #[test]
     fn silent_sessions_turn_inactive_except_waiting() {
-        let mut s = Session::parse(r#"{"session_id":"a","state":"thinking","ts":1000}"#).unwrap();
-        assert_eq!(s.shown_state(1299, 300), "thinking");
+        let mut s = Session::parse(r#"{"session_id":"a","state":"done","ts":1000}"#).unwrap();
+        assert_eq!(s.shown_state(1299, 300), "done");
         assert_eq!(s.shown_state(1300, 300), "inactive");
-        s.state = "done".into();
+        s.state = "thinking".into();
         assert_eq!(s.shown_state(5000, 300), "inactive");
         s.state = "waiting".into();
         assert_eq!(s.shown_state(5000, 300), "waiting");

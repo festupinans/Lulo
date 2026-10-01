@@ -76,14 +76,22 @@ fn run_hook() {
     if std::io::stdin().read_to_end(&mut raw).is_err() {
         return;
     }
-    let Ok(input) = serde_json::from_slice(&raw) else {
-        return;
+    // Tools that feed stdin from .NET or PowerShell may prepend a UTF-8 BOM,
+    // which serde rejects.
+    let json = raw.strip_prefix(b"\xEF\xBB\xBF").unwrap_or(&raw);
+    let input = match serde_json::from_slice(json) {
+        Ok(v) => v,
+        Err(e) => {
+            // Stderr is only shown in Claude Code's debug output for exit 0.
+            eprintln!("lulo-hook: ignored {} bytes of stdin: {e}", raw.len());
+            return;
+        }
     };
     let Some(dir) = status::status_dir() else {
+        eprintln!("lulo-hook: could not determine the status folder");
         return;
     };
     if let Err(e) = status::apply(&dir, &input) {
-        // Stderr is only shown in Claude Code's debug output for exit 0.
         eprintln!("lulo-hook: {e}");
     }
 }
