@@ -1,6 +1,6 @@
 [package]
 name = "lulo-widget"
-version = "0.1.0"
+version = "0.2.0"
 description = "Always-on-top widget showing the live state of every Claude Code session"
 edition.workspace = true
 repository.workspace = true
