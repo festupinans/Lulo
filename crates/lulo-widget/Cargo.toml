@@ -4,6 +4,7 @@ version = "0.3.0"
 description = "Always-on-top widget showing the live state of every Claude Code session"
 edition.workspace = true
 repository.workspace = true
+license.workspace = true
 
 [dependencies]
 # glow (OpenGL) instead of the default wgpu backend: far less memory for a tiny window.

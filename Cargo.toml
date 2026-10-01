@@ -5,6 +5,7 @@ members = ["crates/lulo-hook", "crates/lulo-widget"]
 [workspace.package]
 edition = "2021"
 repository = "https://github.com/festupinans/Lulo"
+license = "MIT"
 
 [profile.release]
 opt-level = 3

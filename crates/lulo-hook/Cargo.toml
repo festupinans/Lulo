@@ -4,6 +4,7 @@ version = "0.3.0"
 description = "Claude Code hook that records each session's live state for the Lulo widget"
 edition.workspace = true
 repository.workspace = true
+license.workspace = true
 
 [dependencies]
 # preserve_order keeps the user's settings.json key order when we rewrite it.
