@@ -60,7 +60,7 @@ const MAX_DOTS: usize = 10;
 // Open: the chips hang just under the moon.
 const ROW_GAP: f32 = 2.0;
 const COLUMNS: usize = 4;
-const CHIP_W: f32 = 144.0;
+const CHIP_W: f32 = 156.0;
 const CHIP_H: f32 = 50.0;
 const GAP: f32 = 6.0;
 const CHIP_OCTOPUS: f32 = 30.0;
@@ -462,29 +462,32 @@ fn draw_chip(painter: &Painter, rect: Rect, s: &Session, state: &str, on: bool, 
 
     let text_x = mascot.right() + 8.0;
     let text_w = (inner.right() - text_x).max(10.0);
+    // How long it has been in this state, small at the top right; the
+    // name gets what is left of the line.
+    let time = s.elapsed(state, now).map(|secs| {
+        painter.layout_no_wrap(sessions::duration(secs), FontId::proportional(10.5), MUTED)
+    });
+    let time_w = time.as_ref().map_or(0.0, |g| g.size().x + 6.0);
     let name = painter.layout_job(one_line(
         &s.project,
         fonts::semibold(13.5),
         Color32::WHITE,
-        text_w,
+        (text_w - time_w).max(10.0),
     ));
-    let mut label = one_line(
+    let label = painter.layout_job(one_line(
         sessions::label(state),
         fonts::semibold(11.5),
         look.color,
         text_w,
-    );
-    if let Some(secs) = s.elapsed(state, now) {
-        label.append(
-            &format!(" · {}", sessions::duration(secs)),
-            0.0,
-            TextFormat::simple(FontId::proportional(11.5), MUTED),
-        );
-    }
-    let label = painter.layout_job(label);
+    ));
     let block = name.size().y + label.size().y;
     let y = mascot.center().y - block / 2.0;
     let name_h = name.size().y;
+    if let Some(time) = time {
+        // Sits on the name's baseline.
+        let ty = y + name_h - time.size().y - 1.0;
+        painter.galley(pos2(inner.right() - time.size().x, ty), time, MUTED);
+    }
     painter.galley(pos2(text_x, y), name, Color32::WHITE);
     painter.galley(pos2(text_x, y + name_h), label, look.color);
 
