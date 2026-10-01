@@ -10,9 +10,74 @@ Un pulpo que vive en el borde de arriba de tu pantalla y te avisa qué está hac
 
 El instalador no está firmado, así que Windows puede mostrar el aviso de SmartScreen la primera vez. Todo el código está en este repositorio para que puedas revisarlo o compilarlo tú mismo.
 
-![Un pulpo por estado: pensando, editando, en el bash, esperándote, terminó y error](docs/img/estados.png)
+<p align="center">
+  <img src="docs/img/estados.gif" width="480" alt="La media luna de Lulo con una ficha que cambia de estado: pensando, editando, bash, leyendo, subagente, esperando, terminó y error">
+</p>
 
-Funciona con [hooks de Claude Code](https://code.claude.com/docs/en/hooks): cada evento ejecuta `lulo-hook.exe`, que escribe el estado de la sesión en `%LOCALAPPDATA%\claude-status\<session_id>.json`. `lulo-widget.exe` vigila esa carpeta y muestra un punto y una ficha por sesión.
+## Así se ve
+
+Lulo es una media luna oscura pegada al borde de arriba de la pantalla. El pulpo cuelga de cabeza y asoma solo los ojos, y debajo hay un punto de color por cada sesión. Al pasar el ratón se abre una ficha por sesión, con su proyecto, su estado, el tiempo que lleva y la barra de tareas.
+
+<p align="center">
+  <img src="docs/img/abierto.gif" width="880" alt="Lulo abierto con seis sesiones: pensando, editando, bash, esperando, terminó y error">
+</p>
+
+## Un pulpo por estado
+
+Cada estado tiene su color y su propia escena animada.
+
+<table>
+  <tr>
+    <td align="center" width="25%"><img src="docs/img/estados/thinking.gif" width="104" alt="Pulpo morado con burbujas de pensamiento"><br><b>Pensando</b><br><sub>Claude razona tu pedido</sub></td>
+    <td align="center" width="25%"><img src="docs/img/estados/editing.gif" width="104" alt="Pulpo azul tecleando frente a un PC"><br><b>Editando</b><br><sub>Escribe o cambia archivos</sub></td>
+    <td align="center" width="25%"><img src="docs/img/estados/bash.gif" width="104" alt="Pulpo verde agua mirando una terminal"><br><b>Bash</b><br><sub>Corre un comando</sub></td>
+    <td align="center" width="25%"><img src="docs/img/estados/reading.gif" width="104" alt="Pulpo celeste buscando con una lupa"><br><b>Leyendo</b><br><sub>Lee, busca o consulta la web</sub></td>
+  </tr>
+  <tr>
+    <td align="center"><img src="docs/img/estados/subagent.gif" width="104" alt="Pulpo rosado llamando a dos pulpitos ayudantes"><br><b>Subagente</b><br><sub>Le pasó trabajo a un ayudante</sub></td>
+    <td align="center"><img src="docs/img/estados/waiting.gif" width="104" alt="Pulpo amarillo impaciente con un reloj"><br><b>Esperando</b><br><sub>Necesita tu permiso o tu respuesta</sub></td>
+    <td align="center"><img src="docs/img/estados/done.gif" width="104" alt="Pulpo verde saltando de alegría"><br><b>Terminó</b><br><sub>Acabó su turno</sub></td>
+    <td align="center"><img src="docs/img/estados/error.gif" width="104" alt="Pulpo rojo con ojos en X"><br><b>Error</b><br><sub>Algo falló</sub></td>
+  </tr>
+</table>
+
+Además, una sesión sin eventos durante 5 minutos pasa a **Inactiva** (gris, el pulpo duerme), y una que terminó su turno con comandos o subagentes aún corriendo sale **En segundo plano**.
+
+## Reacciones
+
+Plegado, el pulpo tiene su propia personalidad. Se sobresalta cuando una sesión empieza a esperarte, celebra con papelitos cuando una termina, se enoja si le das 3 clics seguidos y con 5 se esconde en la luna antes de volver a asomar un ojo.
+
+<p align="center">
+  <img src="docs/img/reacciones.gif" width="480" alt="El pulpo se sobresalta, celebra con papelitos, se enoja con los clics y se esconde en la luna">
+</p>
+
+Si todo lleva 2 minutos terminado, se aburre y juega con un yoyó. En Windows también sigue el ratón con la mirada cuando pasa cerca y guiña un ojo de vez en cuando mientras trabaja.
+
+<p align="center">
+  <img src="docs/img/yoyo.gif" width="400" alt="El pulpo aburrido juega con un yoyó">
+</p>
+
+## Sonidos
+
+Cuando una sesión cambia a un estado que importa, sale una notificación de Windows y suena un sonido corto. Todos están sintetizados con código en [`assets/sounds/synth.py`](assets/sounds/synth.py), sin grabaciones de terceros.
+
+| Cuándo suena | Sonido | Escuchar |
+|---|---|---|
+| Una sesión te espera | Burbujas | [esperando.wav](assets/sounds/esperando.wav) |
+| Una sesión terminó | Plop | [termino.wav](assets/sounds/termino.wav) |
+| Una sesión falló | Glub | [error.wav](assets/sounds/error.wav) |
+| Empieza una sesión nueva (apagado por defecto) | Burbuja | [nueva.wav](assets/sounds/nueva.wav) |
+
+## Cómo funciona
+
+```mermaid
+flowchart LR
+    A["Claude Code<br/>(terminal o app de escritorio)"] -- "cada evento<br/>(hooks)" --> B["lulo-hook.exe"]
+    B -- "escribe" --> C["claude-status<br/>un .json por sesión"]
+    C -- "vigila la carpeta" --> D["lulo-widget.exe<br/>🐙 la media luna"]
+```
+
+Funciona con [hooks de Claude Code](https://code.claude.com/docs/en/hooks): cada evento ejecuta `lulo-hook.exe`, que escribe el estado de la sesión en `%LOCALAPPDATA%\claude-status\<session_id>.json`. `lulo-widget.exe` vigila esa carpeta y muestra un punto y una ficha por sesión. No hay servidores ni navegador: el widget está escrito en Rust con [egui](https://github.com/emilk/egui).
 
 **Para instalarlo, sigue la [guía de instalación](INSTALACION.md).**
 
