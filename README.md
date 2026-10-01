@@ -36,7 +36,7 @@ Haz doble clic en `lulo-widget.exe`. Aparece como una media luna oscura pegada a
 - **Avisos y sonidos:** cuando una sesión pasa a "Esperando", termina o da error, sale una notificación de Windows y suena Burbujas, Plop o Glub. Con No molestar activo, o con algo en pantalla completa, no suena. Nunca suena más de una vez cada 2 s.
 - **Pantalla completa:** con un video, un juego o una presentación en pantalla completa la luna se esconde, y vuelve sola si una sesión espera o falla.
 - **El pulpo de cada ficha:** hace la escena de ese estado. Piensa, teclea frente al PC, mira la terminal, busca con lupa, llama a pulpitos ayudantes, espera impaciente, salta al terminar, tiembla con un error y duerme si no hay actividad.
-- **Segundo plano:** si Claude termina su turno pero dejó comandos o subagentes corriendo en segundo plano, la sesión sale «En segundo plano» en vez de «Terminó», hasta que Claude Code avisa que acabaron.
+- **Segundo plano:** Lulo cuenta los comandos, monitores (`Monitor`) y subagentes que Claude deja corriendo en segundo plano, también los comandos que Claude Code manda al fondo por sí solo. Mientras Claude sigue trabajando, la ficha lo indica junto al estado con un punto violeta que late y la cantidad («+1»). Si Claude termina su turno con alguno vivo, la sesión sale «En segundo plano» en vez de «Terminó». Cada tarea sale de la cuenta cuando Claude Code avisa que acabó (`<task-notification>`) o cuando Claude la detiene con `TaskStop`.
 - **Menú (clic derecho):** "Iniciar con Windows", "Avisos de Windows", "Sonidos", "Esconder en pantalla completa", "Pantalla" (con más de un monitor), "Posición" (izquierda, centro o derecha del borde de arriba) y "Cerrar Lulo". Sobre una sesión inactiva, también "Quitar de la lista".
 - **Inactiva:** una sesión sin eventos durante 5 minutos pasa a "Inactiva" y baja al final. "Esperando" nunca pasa a inactiva, porque necesita que respondas.
 - **Sesiones huérfanas:** si cierras una terminal sin `/exit`, Claude Code no envía `SessionEnd`. El widget borra esos archivos tras 12 horas sin eventos.
@@ -67,6 +67,9 @@ La lista sale de las herramientas de tareas de Claude Code (`TaskCreate`/`TaskUp
 - `prompt` y `started`: el último pedido (recortado) y cuándo se envió.
 - `steps`: las últimas 15 acciones de ese pedido (`state`, `detail`, `ts`).
 - `tasks`: la lista de tareas de Claude (`text`, `status`: `pending`, `in_progress` o `completed`), a partir de `TodoWrite`, `TaskCreated`, `TaskUpdate` y `TaskCompleted`.
+- `background`: lo que sigue corriendo en segundo plano (`id` del `tool_use`, `task` que le dio Claude Code, `kind`: `shell`, `monitor` o `agent`, y `detail`).
+
+Los avisos de Claude Code de que una tarea en segundo plano acabó llegan como `UserPromptSubmit` con un `<task-notification>`. El hook los usa para sacar la tarea de `background`, pero no los toma como el pedido: `prompt`, `started` y `steps` siguen siendo los del último mensaje tuyo.
 
 | Evento | `state` |
 |---|---|

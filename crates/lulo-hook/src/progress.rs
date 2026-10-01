@@ -55,9 +55,9 @@ pub fn merge(prev: Option<Value>, input: &Value, action: &Action, now: u64) -> O
                 rec.insert("since".into(), json!(now));
             }
 
-            // A background task reporting back wakes Claude up, but it is
-            // still working on the person's last message.
-            if event == "UserPromptSubmit" && task_notification(input).is_none() {
+            // A background task reporting back arrives as a prompt too, but
+            // the person's prompt and its steps are still the ones to show.
+            if event == "UserPromptSubmit" && !is_task_notification(input) {
                 let prompt = str_field(input, "prompt")
                     .or_else(|| str_field(input, "user_prompt"))
                     .map(clip_prompt);
@@ -165,11 +165,12 @@ fn background(rec: &Map<String, Value>) -> Vec<Value> {
         .unwrap_or_default()
 }
 
-/// Tracks what keeps running beside the main agent: shells started with
-/// `run_in_background`, Monitor watches (always in the background) and
-/// subagents (SubagentStart to SubagentStop). Claude Code tells Claude that
-/// a background shell ended through a `<task-notification>` prompt, which
-/// names it, so that entry is dropped. Returns whether the list changed.
+/// Tracks the shells, monitors and subagents the main agent left running in
+/// the background. Each entry keeps the `tool_use_id` that started it and,
+/// once the tool answers, the task id Claude Code gave it. Claude Code tells
+/// the model a task ended with a `<task-notification>` prompt naming both,
+/// which removes the entry; stopping it with TaskStop does too. Returns
+/// whether the list changed.
 fn update_background(rec: &mut Map<String, Value>, input: &Value) -> bool {
     let event = str_field(input, "hook_event_name").unwrap_or("");
     let tool = str_field(input, "tool_name").unwrap_or("");
@@ -177,6 +178,7 @@ fn update_background(rec: &mut Map<String, Value>, input: &Value) -> bool {
     let in_subagent = input.get("agent_id").is_some_and(|v| !v.is_null());
     let mut list = background(rec);
     let before = list.clone();
+    let field = |b: &Value, k: &str| b.get(k).and_then(Value::as_str).map(str::to_string);
     let drop_first = |list: &mut Vec<Value>, kind: &str| {
         if let Some(i) = list
             .iter()
@@ -185,62 +187,93 @@ fn update_background(rec: &mut Map<String, Value>, input: &Value) -> bool {
             list.remove(i);
         }
     };
-    // An entry is known by the tool call that started it, by the task id
-    // Claude Code gave it, or by the subagent's id.
-    let drop_id = |list: &mut Vec<Value>, id: &str| {
+    // Drops the entry whose `id` or `task` is one of `keys`; whether any was.
+    let drop_matching = |list: &mut Vec<Value>, keys: &[&str]| {
         let len = list.len();
-        list.retain(|b| str_field(b, "id") != Some(id) && str_field(b, "task") != Some(id));
+        list.retain(|b| {
+            !keys.iter().any(|k| {
+                field(b, "id").as_deref() == Some(k) || field(b, "task").as_deref() == Some(k)
+            })
+        });
         list.len() != len
     };
+    let kind_of = |tool: &str| match state::tool_state(tool) {
+        state::State::Subagent => "agent",
+        _ if tool == "Monitor" => "monitor",
+        _ => "shell",
+    };
+    let tool_use_id = str_field(input, "tool_use_id");
 
     match event {
-        "PreToolUse" if !in_subagent && starts_background(tool, tool_input) => {
+        // Monitor always runs in the background.
+        "PreToolUse"
+            if !in_subagent
+                && (tool == "Monitor"
+                    || tool_input.get("run_in_background").and_then(Value::as_bool)
+                        == Some(true)) =>
+        {
             let detail = str_field(tool_input, "description")
                 .or_else(|| str_field(tool_input, "command"))
                 .map(clip);
-            list.push(
-                json!({ "id": str_field(input, "tool_use_id"), "kind": "shell", "detail": detail }),
-            );
+            list.push(json!({ "id": tool_use_id, "kind": kind_of(tool), "detail": detail }));
         }
-        // The reply to a background call carries the id later messages use.
         "PostToolUse" if !in_subagent => {
-            let call = str_field(input, "tool_use_id");
-            if let (Some(call), Some(task)) = (call, background_task_id(input)) {
-                for b in list.iter_mut().filter(|b| str_field(b, "id") == Some(call)) {
-                    b["task"] = json!(task);
+            let response = input.get("tool_response").unwrap_or(&Value::Null);
+            let task = ["backgroundTaskId", "taskId", "task_id", "agentId"]
+                .iter()
+                .find_map(|k| str_field(response, k));
+            let started = list
+                .iter_mut()
+                .find(|b| tool_use_id.is_some() && field(b, "id").as_deref() == tool_use_id);
+            match (started, task) {
+                (Some(entry), Some(task)) => entry["task"] = json!(task),
+                // A command that outlived its timeout, or that the person
+                // sent to the background, keeps running without having asked.
+                (None, Some(task))
+                    if tool != "TaskStop" && response.get("backgroundTaskId").is_some() =>
+                {
+                    let detail = str_field(tool_input, "description")
+                        .or_else(|| str_field(tool_input, "command"))
+                        .map(clip);
+                    list.push(json!({ "id": tool_use_id, "task": task,
+                                      "kind": kind_of(tool), "detail": detail }));
                 }
+                _ => {}
+            }
+        }
+        // The tool failed, so nothing was left running.
+        "PostToolUseFailure" if !in_subagent => {
+            if let Some(id) = tool_use_id {
+                drop_matching(&mut list, &[id]);
             }
         }
         "PreToolUse" if STOP_TOOLS.contains(&tool) => {
-            let target = ["task_id", "shell_id", "bash_id"]
-                .iter()
-                .find_map(|k| str_field(tool_input, k));
-            if !target.is_some_and(|id| drop_id(&mut list, id)) {
+            let target =
+                str_field(tool_input, "task_id").or_else(|| str_field(tool_input, "shell_id"));
+            if !target.is_some_and(|t| drop_matching(&mut list, &[t])) {
                 drop_first(&mut list, "shell");
             }
         }
-        "SubagentStart" => {
-            let detail = str_field(input, "agent_type").map(clip);
-            list.push(json!({
-                "id": str_field(input, "agent_id"), "kind": "agent", "detail": detail
-            }));
-        }
-        "SubagentStop" => {
-            let id = str_field(input, "agent_id");
-            if !id.is_some_and(|id| drop_id(&mut list, id)) {
-                drop_first(&mut list, "agent");
-            }
-        }
         "UserPromptSubmit" => {
-            if let Some(text) = task_notification(input) {
-                for tag in ["tool-use-id", "task-id"] {
-                    for id in elements(text, tag) {
-                        drop_id(&mut list, id.trim());
-                    }
+            for (keys, ended) in task_notifications(input) {
+                if ended {
+                    let keys: Vec<&str> = keys.iter().map(String::as_str).collect();
+                    drop_matching(&mut list, &keys);
                 }
             }
         }
-        // Subagents already leave through SubagentStop.
+        "SubagentStop" => {
+            let agent: Vec<&str> = str_field(input, "agent_id").into_iter().collect();
+            // A foreground subagent finishing must not take a background one.
+            if !drop_matching(&mut list, &agent) {
+                if let Some(i) = list.iter().position(|b| {
+                    field(b, "kind").as_deref() == Some("agent") && b.get("task").is_none()
+                }) {
+                    list.remove(i);
+                }
+            }
+        }
+        // Older Claude Code versions without task notifications.
         "Notification" if str_field(input, "notification_type") == Some("agent_completed") => {
             drop_first(&mut list, "shell")
         }
@@ -260,42 +293,40 @@ fn update_background(rec: &mut Map<String, Value>, input: &Value) -> bool {
     true
 }
 
-/// A shell sent to the background, or a Monitor, which always runs there.
-fn starts_background(tool: &str, tool_input: &Value) -> bool {
-    let flagged = tool_input.get("run_in_background").and_then(Value::as_bool) == Some(true);
-    tool == "Monitor" || (flagged && state::tool_state(tool) == state::State::Bash)
+fn is_task_notification(input: &Value) -> bool {
+    str_field(input, "prompt").is_some_and(|p| p.trim_start().starts_with("<task-notification>"))
 }
 
-/// The id Claude Code gave a background shell, from the tool's reply.
-fn background_task_id(input: &Value) -> Option<String> {
-    let response = input.get("tool_response")?;
-    ["backgroundTaskId", "task_id", "taskId", "shell_id"]
-        .iter()
-        .find_map(|k| str_or_num(response, k))
-}
-
-/// The prompt, when it is Claude Code reporting that background work ended
-/// rather than something the person typed.
-fn task_notification(input: &Value) -> Option<&str> {
-    let prompt = str_field(input, "prompt").or_else(|| str_field(input, "user_prompt"))?;
-    prompt
-        .trim_start()
-        .starts_with("<task-notification>")
-        .then_some(prompt)
-}
-
-/// Contents of every `<name>…</name>` element in `s`.
-fn elements<'a>(s: &'a str, name: &str) -> Vec<&'a str> {
-    let (open, close) = (format!("<{name}>"), format!("</{name}>"));
-    let mut out = Vec::new();
-    let mut rest = s;
-    while let Some(start) = rest.find(&open) {
-        let body = &rest[start + open.len()..];
-        let Some(end) = body.find(&close) else { break };
-        out.push(&body[..end]);
-        rest = &body[end + close.len()..];
+/// The tasks a `<task-notification>` prompt reports on: the ids naming each
+/// one (`<task-id>`, `<tool-use-id>`) and whether it ended. One prompt can
+/// carry several notifications. A finished task has a `<status>`
+/// (completed, failed, stopped...); a monitor's events and a shell waiting
+/// for input come without one, except a monitor that expired.
+fn task_notifications(input: &Value) -> Vec<(Vec<String>, bool)> {
+    if !is_task_notification(input) {
+        return Vec::new();
     }
-    out
+    let prompt = str_field(input, "prompt").unwrap_or("");
+    prompt
+        .split("<task-notification>")
+        .skip(1)
+        .map(|block| {
+            let block = block.split("</task-notification>").next().unwrap_or(block);
+            let ids = ["task-id", "tool-use-id"]
+                .iter()
+                .filter_map(|tag| last_element(block, tag))
+                .map(|id| id.trim().to_string())
+                .filter(|id| !id.is_empty())
+                .collect();
+            let status = last_element(block, "status").map(str::trim);
+            let ended = match status {
+                Some(s) => !matches!(s, "running" | "in_progress" | "pending"),
+                None => last_element(block, "event")
+                    .is_some_and(|e| e.trim_start().starts_with("[Monitor expired")),
+            };
+            (ids, ended)
+        })
+        .collect()
 }
 
 fn set_status(tasks: &mut [Value], id: &str, status: &str) {
@@ -614,8 +645,7 @@ mod tests {
         };
         let r = step(None, ev("UserPromptSubmit", json!({ "prompt": "x" })), 1);
         let r = step(r, bg("Bash", "Start dev server"), 2);
-        let agent = json!({ "agent_id": "a1", "agent_type": "Explore" });
-        let r = step(r, ev("SubagentStart", agent.clone()), 3);
+        let r = step(r, bg("Agent", "Explore the API"), 3);
         // A foreground call doesn't count.
         let r = step(
             r,
@@ -631,7 +661,7 @@ mod tests {
         assert_eq!(r["background"].as_array().unwrap().len(), 2);
 
         // The subagent reports back, then the shell.
-        let r = step(Some(r), ev("SubagentStop", agent), 6);
+        let r = step(Some(r), ev("SubagentStop", json!({ "agent_id": "a1" })), 6);
         let r = step(r, ev("Stop", json!({})), 7).unwrap();
         assert_eq!(r["state"], "background");
         let done = ev(
@@ -640,78 +670,6 @@ mod tests {
         );
         let r = step(Some(r), done, 8);
         let r = step(r, ev("Stop", json!({})), 9).unwrap();
-        assert_eq!(r["state"], "done");
-        assert!(r.get("background").is_none());
-    }
-
-    #[test]
-    fn running_work_is_counted_while_claude_works() {
-        let r = step(None, ev("UserPromptSubmit", json!({ "prompt": "x" })), 1);
-        let monitor = ev(
-            "PreToolUse",
-            json!({ "tool_name": "Monitor", "tool_use_id": "m1",
-                    "tool_input": { "description": "Wait for the build" } }),
-        );
-        let r = step(r, monitor, 2);
-        let r = step(
-            r,
-            ev(
-                "PreToolUse",
-                json!({ "tool_name": "Edit", "tool_input": {} }),
-            ),
-            3,
-        )
-        .unwrap();
-        assert_eq!(r["state"], "editing");
-        assert_eq!(r["background"][0]["detail"], "Wait for the build");
-    }
-
-    #[test]
-    fn a_task_notification_drops_its_task_and_keeps_the_prompt() {
-        let r = step(
-            None,
-            ev(
-                "UserPromptSubmit",
-                json!({ "prompt": "Arranca el servidor" }),
-            ),
-            1,
-        );
-        let start = |id: &str| {
-            ev(
-                "PreToolUse",
-                json!({ "tool_name": "Bash", "tool_use_id": id,
-                        "tool_input": { "command": "npm start", "run_in_background": true } }),
-            )
-        };
-        let r = step(r, start("toolu_1"), 2);
-        let r = step(r, start("toolu_2"), 3);
-        // The second shell's id arrives with its reply.
-        let reply = ev(
-            "PostToolUse",
-            json!({ "tool_name": "Bash", "tool_use_id": "toolu_2",
-                    "tool_response": { "backgroundTaskId": "b2" } }),
-        );
-        let r = step(r, reply, 4);
-        let r = step(r, ev("Stop", json!({})), 5);
-
-        let note = "<task-notification>\n<task-id>b2</task-id>\n\
-                    <status>completed</status>\n</task-notification>";
-        let r = step(r, ev("UserPromptSubmit", json!({ "prompt": note })), 6).unwrap();
-        assert_eq!(r["state"], "thinking");
-        assert_eq!(r["prompt"], "Arranca el servidor");
-        assert_eq!(r["started"], 1);
-        let left = r["background"].as_array().unwrap();
-        assert_eq!(left.len(), 1);
-        assert_eq!(left[0]["id"], "toolu_1");
-
-        let note = "<task-notification><tool-use-id>toolu_1</tool-use-id>\
-                    <status>completed</status></task-notification>";
-        let r = step(
-            Some(r),
-            ev("UserPromptSubmit", json!({ "prompt": note })),
-            7,
-        );
-        let r = step(r, ev("Stop", json!({})), 8).unwrap();
         assert_eq!(r["state"], "done");
         assert!(r.get("background").is_none());
     }
@@ -738,6 +696,153 @@ mod tests {
         );
         let r = step(r, ev("Stop", json!({})), 4).unwrap();
         assert_eq!(r["state"], "done");
+    }
+
+    fn notification(task: &str, tool_use: &str, tail: &str) -> Value {
+        let prompt = format!(
+            "<task-notification>\n<task-id>{task}</task-id>\n<tool-use-id>{tool_use}</tool-use-id>\n\
+             <output-file>C:\\tmp\\{task}.output</output-file>\n{tail}\n</task-notification>"
+        );
+        ev("UserPromptSubmit", json!({ "prompt": prompt }))
+    }
+
+    fn started(tool: &str, id: &str, input: Value, task: &str) -> [Value; 2] {
+        let key = if tool == "Monitor" {
+            "taskId"
+        } else {
+            "backgroundTaskId"
+        };
+        [
+            ev(
+                "PreToolUse",
+                json!({ "tool_name": tool, "tool_use_id": id, "tool_input": input }),
+            ),
+            ev(
+                "PostToolUse",
+                json!({ "tool_name": tool, "tool_use_id": id, "tool_input": input,
+                        "tool_response": { key: task } }),
+            ),
+        ]
+    }
+
+    fn pending(r: &Value) -> Vec<&str> {
+        r["background"]
+            .as_array()
+            .map(|l| l.iter().filter_map(|b| b["detail"].as_str()).collect())
+            .unwrap_or_default()
+    }
+
+    #[test]
+    fn task_notifications_end_background_work() {
+        let mut r = step(
+            None,
+            ev("UserPromptSubmit", json!({ "prompt": "Prueba Arnidol" })),
+            1,
+        );
+        let shell = json!({ "command": "npx ng serve", "description": "Dev server", "run_in_background": true });
+        let monitor = json!({ "command": "until grep ...", "description": "Wait for build" });
+        for e in started("Bash", "toolu_A", shell, "bsh1")
+            .into_iter()
+            .chain(started("Monitor", "toolu_B", monitor, "bmo1"))
+        {
+            r = step(r, e, 2);
+        }
+        let r = r.unwrap();
+        assert_eq!(pending(&r), ["Dev server", "Wait for build"]);
+        // While Claude still works, the state is the work, the list stays.
+        assert_eq!(r["state"], "thinking");
+
+        let r = step(Some(r), ev("Stop", json!({})), 3).unwrap();
+        assert_eq!(r["state"], "background");
+
+        // A monitor event is news, not the end.
+        let event = notification(
+            "bmo1",
+            "toolu_B",
+            "<summary>Monitor event</summary>\n<event>Compiled</event>",
+        );
+        let r = step(Some(r), event, 4).unwrap();
+        assert_eq!(pending(&r).len(), 2);
+        // The notification doesn't replace the person's prompt or steps.
+        assert_eq!(r["prompt"], "Prueba Arnidol");
+        assert_eq!(r["steps"].as_array().unwrap().len(), 2);
+
+        let ended = notification(
+            "bmo1",
+            "toolu_B",
+            "<status>completed</status>\n<summary>stream ended</summary>",
+        );
+        let r = step(Some(r), ended, 5);
+        let r = step(r, ev("Stop", json!({})), 6).unwrap();
+        assert_eq!(
+            (r["state"].as_str(), pending(&r)),
+            (Some("background"), vec!["Dev server"])
+        );
+
+        let killed = notification("bsh1", "toolu_A", "<status>failed</status>");
+        let r = step(Some(r), killed, 7);
+        let r = step(r, ev("Stop", json!({})), 8).unwrap();
+        assert_eq!(r["state"], "done");
+        assert!(r.get("background").is_none());
+    }
+
+    #[test]
+    fn expired_monitors_and_stopped_tasks_leave() {
+        let mut r = step(None, ev("UserPromptSubmit", json!({ "prompt": "x" })), 1);
+        let a = json!({ "command": "a", "description": "Server A", "run_in_background": true });
+        let b = json!({ "command": "b", "description": "Server B", "run_in_background": true });
+        let m = json!({ "command": "m", "description": "Watch" });
+        for e in started("Bash", "tA", a, "ta")
+            .into_iter()
+            .chain(started("Bash", "tB", b, "tb"))
+            .chain(started("Monitor", "tM", m, "tm"))
+        {
+            r = step(r, e, 2);
+        }
+        // TaskStop names the task: B goes, not the first shell.
+        let stop = ev(
+            "PreToolUse",
+            json!({ "tool_name": "TaskStop", "tool_input": { "task_id": "tb" } }),
+        );
+        let r = step(r, stop, 3).unwrap();
+        assert_eq!(pending(&r), ["Server A", "Watch"]);
+
+        let expired = notification(
+            "tm",
+            "",
+            "<summary>Monitor event</summary>\n<event>[Monitor expired after 5m with no events delivered.]</event>",
+        );
+        let r = step(Some(r), expired, 4).unwrap();
+        assert_eq!(pending(&r), ["Server A"]);
+    }
+
+    #[test]
+    fn commands_sent_to_the_background_later_count() {
+        let r = step(None, ev("UserPromptSubmit", json!({ "prompt": "x" })), 1);
+        // Started in the foreground; Claude Code moved it to the background.
+        let post = ev(
+            "PostToolUse",
+            json!({ "tool_name": "Bash", "tool_use_id": "t1",
+                    "tool_input": { "command": "npm test", "description": "Run tests" },
+                    "tool_response": { "stdout": "", "backgroundTaskId": "b1" } }),
+        );
+        let r = step(r, post, 2);
+        let r = step(r, ev("Stop", json!({})), 3).unwrap();
+        assert_eq!(
+            (r["state"].as_str(), r["detail"].as_str()),
+            (Some("background"), Some("Run tests"))
+        );
+
+        // A foreground subagent finishing leaves a background one alone.
+        let agent = json!({ "description": "Explore", "run_in_background": true });
+        let mut r = Some(r);
+        for e in started("Agent", "t2", agent, "ag1") {
+            r = step(r, e, 4);
+        }
+        let r = step(r, ev("SubagentStop", json!({ "agent_id": "other" })), 5).unwrap();
+        assert_eq!(pending(&r), ["Run tests", "Explore"]);
+        let r = step(Some(r), ev("SubagentStop", json!({ "agent_id": "ag1" })), 6).unwrap();
+        assert_eq!(pending(&r), ["Run tests"]);
     }
 
     #[test]
