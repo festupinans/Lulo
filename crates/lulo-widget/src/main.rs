@@ -15,9 +15,11 @@
 #![cfg_attr(windows, windows_subsystem = "windows")]
 
 mod autostart;
+mod cursor;
 mod fonts;
 mod glass;
 mod island;
+mod mood;
 mod octopus;
 mod sessions;
 mod settings;
@@ -34,6 +36,7 @@ use eframe::egui::{
 };
 use notify::{RecursiveMode, Watcher};
 
+use octopus::Act;
 use sessions::Session;
 use settings::Settings;
 
@@ -61,6 +64,10 @@ const CHIP_W: f32 = 144.0;
 const CHIP_H: f32 = 50.0;
 const GAP: f32 = 6.0;
 const CHIP_OCTOPUS: f32 = 30.0;
+/// How close the mouse must be for the octopus to look at it (points).
+const NEAR_MOUSE: f32 = 260.0;
+/// Height of the eyes on the moon's canvas.
+const MOON_EYES_Y: f32 = 35.5;
 /// Window size needed while the right-click menu is open.
 const MENU_ROOM: Vec2 = vec2(190.0, 110.0);
 /// Solid backgrounds for the chips.
@@ -112,6 +119,7 @@ struct App {
     /// Session whose details are shown; stays while the mouse moves down to them.
     hovered: Option<String>,
     geometry: Option<(Pos2, Vec2)>,
+    mood: mood::Mood,
 }
 
 impl App {
@@ -136,6 +144,7 @@ impl App {
             last_inside: None,
             hovered: None,
             geometry: None,
+            mood: mood::Mood::default(),
         }
     }
 
@@ -168,6 +177,21 @@ impl App {
             ctx.send_viewport_cmd(egui::ViewportCommand::InnerSize(size));
             ctx.send_viewport_cmd(egui::ViewportCommand::OuterPosition(pos));
             self.geometry = Some((pos, size));
+        }
+    }
+
+    /// The right-click menu: autostart and close.
+    fn menu(&mut self, ui: &mut egui::Ui) {
+        if autostart::SUPPORTED
+            && ui
+                .checkbox(&mut self.autostart, "Iniciar con Windows")
+                .changed()
+        {
+            autostart::set(self.autostart);
+            self.autostart = autostart::is_enabled();
+        }
+        if ui.button("Cerrar Lulo").clicked() {
+            ui.ctx().send_viewport_cmd(egui::ViewportCommand::Close);
         }
     }
 
@@ -245,19 +269,7 @@ impl eframe::App for App {
         let full = ui.max_rect();
         // Right-click anywhere: autostart and close.
         let background = ui.interact(full, ui.id().with("bg"), Sense::click());
-        background.context_menu(|ui| {
-            if autostart::SUPPORTED
-                && ui
-                    .checkbox(&mut self.autostart, "Iniciar con Windows")
-                    .changed()
-            {
-                autostart::set(self.autostart);
-                self.autostart = autostart::is_enabled();
-            }
-            if ui.button("Cerrar Lulo").clicked() {
-                ctx.send_viewport_cmd(egui::ViewportCommand::Close);
-            }
-        });
+        background.context_menu(|ui| self.menu(ui));
 
         let state = island::focus(&rows);
         let active: Vec<&str> = rows
@@ -268,9 +280,33 @@ impl eframe::App for App {
         let open = self.expanded && !rows.is_empty();
         let moon = moon_size(active.len());
         let mut size = moon;
+
+        // Short reactions of the octopus on top of its state.
+        let act = if self.settings.animate {
+            let now = ctx.input(|i| i.time);
+            self.mood
+                .observe(rows.iter().map(|(s, st)| (s.id.as_str(), *st)), state, now);
+            let eyes = pos2(moon.x / 2.0, MOON_EYES_Y * moon.x / octopus::MOON_SIZE.x);
+            let look = if open { None } else { nearby_mouse(&ctx, eyes) };
+            self.mood.act(state, now, !open, look)
+        } else {
+            Act::None
+        };
+
         if open {
             size = self.draw_open(ui, full.min, moon, &rows, t);
+        } else {
+            // The yo-yo hangs below the moon's usual canvas.
+            size.y = moon.y * act.canvas_height() / octopus::MOON_SIZE.y;
         }
+        // Clicks on the moon count toward annoying the octopus.
+        let moon_rect =
+            Rect::from_min_size(pos2(full.min.x + (size.x - moon.x) / 2.0, full.min.y), moon);
+        let poke = ui.interact(moon_rect, ui.id().with("moon"), Sense::click());
+        if poke.clicked() {
+            self.mood.click(ctx.input(|i| i.time));
+        }
+        poke.context_menu(|ui| self.menu(ui));
         // Last, so the moon and the peeking head sit over everything else.
         draw_moon(
             ui.painter(),
@@ -280,6 +316,7 @@ impl eframe::App for App {
             &active,
             state,
             t,
+            act,
         );
         // Room for the right-click menu, which draws inside the window.
         if egui::Popup::is_any_open(&ctx) {
@@ -299,6 +336,16 @@ impl eframe::App for App {
     }
 }
 
+/// Direction from the octopus's eyes (`eyes`, in window points) to the mouse
+/// when it is near the widget but outside it.
+fn nearby_mouse(ctx: &egui::Context, eyes: Pos2) -> Option<Vec2> {
+    let (x, y) = cursor::screen_px()?;
+    let (outer, ppp) = ctx.input(|i| (i.viewport().outer_rect, i.pixels_per_point));
+    let d = pos2(x / ppp, y / ppp) - (outer?.min + eyes.to_vec2());
+    let dist = d.length();
+    (dist > 1.0 && dist < NEAR_MOUSE).then(|| d / dist)
+}
+
 /// Size of the half moon: wider only when many dots need room.
 fn moon_size(dots: usize) -> Vec2 {
     let row = dots.min(MAX_DOTS).saturating_sub(1) as f32 * DOT_STEP;
@@ -307,6 +354,7 @@ fn moon_size(dots: usize) -> Vec2 {
 }
 
 /// The half moon centered on `center_x`, with one dot per active session.
+#[allow(clippy::too_many_arguments)]
 fn draw_moon(
     painter: &Painter,
     center_x: f32,
@@ -315,9 +363,10 @@ fn draw_moon(
     active: &[&str],
     state: &str,
     t: f64,
+    act: Act,
 ) {
     let moon = Rect::from_min_size(pos2(center_x - size.x / 2.0, top), size);
-    octopus::moon(painter, moon, state, t);
+    octopus::moon(painter, moon, state, t, act);
     let dots = active.len().min(MAX_DOTS);
     let y = top + octopus::MOON_DOTS_Y * size.x / octopus::MOON_SIZE.x;
     let mut x = center_x - dots.saturating_sub(1) as f32 * DOT_STEP / 2.0;
@@ -350,6 +399,7 @@ impl App {
 
         let x = origin.x + (width - row_w) / 2.0;
         let mut hovered = self.hovered.clone();
+        let mut forget = None;
         for (i, (s, st)) in rows.iter().enumerate() {
             let (col, line) = (i % COLUMNS, i / COLUMNS);
             let chip = Rect::from_min_size(
@@ -359,16 +409,36 @@ impl App {
                 ),
                 vec2(CHIP_W, CHIP_H),
             );
-            if ui
-                .interact(chip, ui.id().with(("chip", &s.id)), Sense::hover())
-                .hovered()
-            {
+            // Inactive chips take the right click to offer leaving the list;
+            // the others let it through to the general menu.
+            let inactive = *st == "inactive";
+            let sense = if inactive {
+                Sense::click()
+            } else {
+                Sense::hover()
+            };
+            let response = ui.interact(chip, ui.id().with(("chip", &s.id)), sense);
+            if response.hovered() {
                 hovered = Some(s.id.clone());
+            }
+            if inactive {
+                response.context_menu(|ui| {
+                    if ui.button("Quitar de la lista").clicked() {
+                        forget = Some(s.id.clone());
+                    }
+                    ui.separator();
+                    self.menu(ui);
+                });
             }
             let on = hovered.as_deref() == Some(s.id.as_str());
             draw_chip(ui.painter(), chip, s, st, on, t);
         }
         self.hovered = hovered;
+        if let (Some(id), Some(dir)) = (forget, &self.dir) {
+            sessions::forget(dir, &id);
+            self.dirty.store(true, Ordering::Relaxed);
+            ui.ctx().request_repaint();
+        }
         size
     }
 }

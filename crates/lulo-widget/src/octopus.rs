@@ -87,34 +87,77 @@ pub fn paint(painter: &Painter, rect: Rect, state: &str, t: f64) {
     }
 }
 
+/// A short reaction of the collapsed octopus, on top of its state. Chosen
+/// by `mood`; progress values run 0..1 through the animation.
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub enum Act {
+    #[default]
+    None,
+    /// Looks around, yawns and plays with a yo-yo.
+    Bored(f32),
+    /// Frowns and shakes after a few clicks.
+    Angry,
+    /// Pulled up into the moon by `lift`; `peek` shows one eye.
+    Hiding { lift: f32, peek: bool },
+    /// Eyes turned toward a nearby mouse (x, y each -1..1).
+    Look(f32, f32),
+    /// A hop and confetti when a session finishes.
+    Celebrate(f32),
+    /// Round eyes and a "!" when a session starts waiting.
+    Startled(f32),
+    /// Closes one eye for a moment.
+    Wink,
+}
+
+impl Act {
+    /// Height of the canvas this act draws into; the yo-yo hangs lower
+    /// than the moon's usual 60.
+    pub fn canvas_height(self) -> f32 {
+        match self {
+            Act::Bored(_) => 70.,
+            _ => MOON_SIZE.y,
+        }
+    }
+}
+
 /// The collapsed widget: a dark half moon hanging from the top edge of the
 /// screen, with the octopus upside down behind it so only the crown of its
-/// head and its eyes peek out. The eyes act out `state`. Designed on a
-/// 160×60 canvas (the mockup's), scaled to the width of `rect`.
-pub fn moon(painter: &Painter, rect: Rect, state: &str, t: f64) {
+/// head and its eyes peek out. The eyes act out `state`, or `act` when it
+/// has one. Designed on a 160×60 canvas (the mockup's), scaled to the
+/// width of `rect`.
+pub fn moon(painter: &Painter, rect: Rect, state: &str, t: f64, act: Act) {
     let k = rect.width() / MOON_SIZE.x;
     let pen = Pen {
         painter,
         m: Affine::translate(rect.left(), rect.top()).then(Affine::scale(k, k)),
     };
     let c = style::look(state).color;
-    let (dx, dy) = match state {
-        "waiting" => (0., 2.2 * pulse(t, 0.5)),
-        "error" => (0.8 * (TAU * t / 0.35).sin() as f32, 0.),
-        "done" => (
+    let (dx, dy) = match (act, state) {
+        (Act::Hiding { lift, .. }, _) => (0., -lift),
+        // Still while playing, so the eyes can follow the yo-yo.
+        (Act::Bored(_), _) => (0., 0.),
+        (Act::Angry, _) => (0.9 * (TAU * t / 0.18).sin() as f32, 0.),
+        (Act::Celebrate(p), _) => (0., 3. * keys(p, &[(0., 0.), (0.12, 1.), (0.3, 0.)])),
+        (Act::Startled(p), _) => (0., keys(p, &[(0., 0.), (0.08, 4.), (0.6, 3.), (0.8, 0.)])),
+        (_, "waiting") => (0., 2.2 * pulse(t, 0.5)),
+        (_, "error") => (0.8 * (TAU * t / 0.35).sin() as f32, 0.),
+        (_, "done") => (
             0.,
             3. * keys(phase(t, 1.2, 0.), &[(0., 0.), (0.4, 1.), (1., 0.)]),
         ),
         _ => (0., 1.2 * pulse(t, 2.4)),
     };
     let me = pen.with(Affine::translate(dx, dy));
+    if let Act::Bored(p) = act {
+        yoyo(me, p, c);
+    }
     head(
         me.with(Affine::translate(49., 0.))
             .with(Affine::scale(0.62, 0.62))
             .with(Affine::about(50., 50., Affine::rotate(180.))),
         c,
     );
-    peek_eyes(me, state, t);
+    peek_eyes(me, state, t, act);
 
     // The moon goes over the upper part of the head.
     let edge = curve(
@@ -126,6 +169,16 @@ pub fn moon(painter: &Painter, rect: Rect, state: &str, t: f64) {
     );
     pen.fill(&edge, MOON);
     pen.stroke(&edge, 0.9, Color32::from_white_alpha(28));
+
+    match act {
+        Act::Celebrate(p) => confetti(pen, p),
+        Act::Startled(p) if p < 0.6 => {
+            let bang = style::look("waiting").color;
+            pen.rrect(96.6, 34., 1.9, 5.6, 0.95, bang);
+            pen.circle(97.55, 42., 1., bang);
+        }
+        _ => {}
+    }
 }
 
 /// Size of the moon's design canvas.
@@ -134,12 +187,101 @@ pub const MOON_SIZE: Vec2 = vec2(160., 60.);
 pub const MOON_DOTS_Y: f32 = 12.;
 const MOON: Color32 = Color32::from_rgb(21, 21, 28);
 
+const L: f32 = 73.8;
+const R: f32 = 86.2;
+const Y: f32 = 35.5;
+
 /// Eyes drawn upright even though the head hangs upside down, so each state
 /// gets its own expression.
-fn peek_eyes(pen: Pen, state: &str, t: f64) {
-    const L: f32 = 73.8;
-    const R: f32 = 86.2;
-    const Y: f32 = 35.5;
+fn peek_eyes(pen: Pen, state: &str, t: f64, act: Act) {
+    let pill = |x: f32, y: f32| pen.rrect(x - 1.65, y - 2.9, 3.3, 5.8, 1.65, EYE);
+    match act {
+        Act::Bored(p) => {
+            if (0.2..0.34).contains(&p) {
+                // A yawn: eyes shut, mouth opening and closing.
+                for x in [L, R] {
+                    pen.stroke(&[pos2(x - 2., Y), pos2(x + 2., Y)], 1.3, EYE);
+                }
+                let open = keys(p, &[(0.2, 0.), (0.28, 2.2), (0.34, 0.)]);
+                if open > 0.2 {
+                    pen.fill(&ellipse(80., 42.5, 1.8, open), EYE);
+                }
+            } else {
+                // Looks around, then follows the yo-yo.
+                let dx = keys(
+                    p,
+                    &[
+                        (0., -1.6),
+                        (0.14, 1.6),
+                        (0.2, 0.),
+                        (0.5, -1.),
+                        (0.62, -1.6),
+                        (0.74, -1.),
+                        (0.86, -1.6),
+                        (0.94, 0.),
+                    ],
+                );
+                let dy = keys(
+                    p,
+                    &[
+                        (0.34, 0.),
+                        (0.5, 0.6),
+                        (0.62, 2.),
+                        (0.74, 0.6),
+                        (0.86, 2.),
+                        (0.94, 0.),
+                    ],
+                );
+                pill(L + dx, Y + dy);
+                pill(R + dx, Y + dy);
+            }
+            return;
+        }
+        Act::Angry | Act::Hiding { peek: false, .. } => {
+            // Frowning brows over small eyes, and an anger mark.
+            pen.stroke(&[pos2(L - 2.2, 32.6), pos2(L + 1.8, 34.4)], 1.3, EYE);
+            pen.stroke(&[pos2(R + 2.2, 32.6), pos2(R - 1.8, 34.4)], 1.3, EYE);
+            for x in [L, R] {
+                pen.rrect(x - 1.3, 35.6, 2.6, 3.2, 1.3, EYE);
+            }
+            let mark = style::look("error").color;
+            pen.stroke(&[pos2(96., 39.), pos2(98., 37.)], 1., mark);
+            pen.stroke(&[pos2(97.4, 41.6), pos2(100.2, 41.6)], 1., mark);
+            pen.stroke(&[pos2(96., 44.2), pos2(98., 46.2)], 1., mark);
+            return;
+        }
+        Act::Hiding { peek: true, .. } => {
+            // One eye low on the head, the only one out of the moon.
+            pill(R, Y + 7.5);
+            return;
+        }
+        Act::Startled(p) if p < 0.6 => {
+            for x in [L, R] {
+                pen.circle(x, Y, 2.6, EYE);
+                pen.circle(x + 0.8, Y - 0.8, 0.7, Color32::WHITE);
+            }
+            return;
+        }
+        Act::Celebrate(_) => {
+            happy_eyes(pen);
+            return;
+        }
+        Act::Look(x, y) => {
+            pill(L + 2. * x, Y + 0.4 + 1.6 * y.max(0.));
+            pill(R + 2. * x, Y + 0.4 + 1.6 * y.max(0.));
+            return;
+        }
+        Act::Wink => {
+            pill(L, Y + 1.);
+            let arc = curve(
+                [R - 2., Y + 1.4],
+                &[quad([R - 2., Y + 1.4], [R, Y + 3.2], [R + 2., Y + 1.4])],
+            );
+            pen.stroke(&arc, 1.3, EYE);
+            return;
+        }
+        _ => {}
+    }
     match state {
         "error" => {
             for x in [L, R] {
@@ -147,15 +289,7 @@ fn peek_eyes(pen: Pen, state: &str, t: f64) {
                 pen.stroke(&[pos2(x + 1.8, Y - 1.8), pos2(x - 1.8, Y + 1.8)], 1.3, EYE);
             }
         }
-        "done" => {
-            for x in [L, R] {
-                let arc = curve(
-                    [x - 2., Y + 1.],
-                    &[quad([x - 2., Y + 1.], [x, Y - 2.4], [x + 2., Y + 1.])],
-                );
-                pen.stroke(&arc, 1.4, EYE);
-            }
-        }
+        "done" => happy_eyes(pen),
         "inactive" => {
             for x in [L, R] {
                 pen.stroke(&[pos2(x - 2., Y), pos2(x + 2., Y)], 1.4, EYE);
@@ -192,6 +326,65 @@ fn peek_eyes(pen: Pen, state: &str, t: f64) {
                 eye.rrect(x + dx - 1.65, Y - 2.9 + dy, 3.3, 5.8, 1.65, EYE);
             }
         }
+    }
+}
+
+fn happy_eyes(pen: Pen) {
+    for x in [L, R] {
+        let arc = curve(
+            [x - 2., Y + 1.],
+            &[quad([x - 2., Y + 1.], [x, Y - 2.4], [x + 2., Y + 1.])],
+        );
+        pen.stroke(&arc, 1.4, EYE);
+    }
+}
+
+/// An arm reaches out from behind the head and bounces a yo-yo twice.
+fn yoyo(pen: Pen, p: f32, c: Color32) {
+    let reach = keys(p, &[(0.34, 0.), (0.5, 1.), (0.86, 1.), (0.94, 0.)]);
+    if reach <= 0.02 {
+        return;
+    }
+    let (from, to) = (pos2(68., 42.), pos2(60., 53.));
+    pen.stroke(&[from, from + (to - from) * reach], 4.4, c);
+    if reach < 0.98 {
+        return;
+    }
+    let end = keys(
+        p,
+        &[
+            (0.5, 57.),
+            (0.62, 66.),
+            (0.74, 57.),
+            (0.86, 66.),
+            (0.94, 57.),
+        ],
+    );
+    pen.stroke(
+        &[pos2(60., 55.), pos2(60., end)],
+        0.5,
+        Color32::from_gray(229),
+    );
+    pen.circle(60., end + 1., 2.3, style::look("subagent").color);
+}
+
+/// Paper bits that pop out from under the moon and fall.
+fn confetti(pen: Pen, p: f32) {
+    const BITS: [(f32, &str, f32, f32); 6] = [
+        (62., "subagent", -9., 16.),
+        (70., "editing", -4., 20.),
+        (77., "waiting", 1., 17.),
+        (84., "done", 3., 21.),
+        (91., "thinking", 7., 16.),
+        (98., "bash", 10., 19.),
+    ];
+    let out = keys(p, &[(0., 0.), (0.5, 1.)]);
+    let fall = ((p - 0.5) / 0.5).clamp(0., 1.);
+    let alpha = keys(p, &[(0., 1.), (0.7, 1.), (1., 0.)]);
+    for (x, state, dx, dy) in BITS {
+        let color = style::look(state).color.gamma_multiply(alpha);
+        let (bx, by) = (x + dx * (out + 0.3 * fall), 28. + dy * out + 8. * fall);
+        pen.rrect(bx, by, 2., 3.2, 0.5, color);
     }
 }
 
@@ -853,9 +1046,27 @@ mod tests {
         let ctx = Context::default();
         let painter = Painter::new(ctx, LayerId::background(), Rect::EVERYTHING);
         let rect = Rect::from_min_size(pos2(0., 0.), MOON_SIZE);
+        let acts = [
+            Act::None,
+            Act::Angry,
+            Act::Hiding {
+                lift: 9.,
+                peek: true,
+            },
+            Act::Look(1., 1.),
+            Act::Look(-1., -1.),
+            Act::Wink,
+        ];
         for state in ["waiting", "error", "done", "inactive", "editing"] {
             for t in [0., 0.3, 1.1] {
-                moon(&painter, rect, state, t);
+                for act in acts {
+                    moon(&painter, rect, state, t, act);
+                }
+            }
+        }
+        for p in [0., 0.1, 0.25, 0.5, 0.62, 0.9, 1.] {
+            for act in [Act::Celebrate(p), Act::Startled(p)] {
+                moon(&painter, rect, "done", 0.5, act);
             }
         }
         let bounds = painter.ctx().graphics(|g| {
@@ -868,6 +1079,32 @@ mod tests {
                 .unwrap_or_default()
         });
         assert!(!bounds.is_empty());
+        for b in bounds {
+            assert!(rect.expand(1.).contains_rect(b), "{b:?}");
+        }
+    }
+
+    #[test]
+    fn the_yoyo_fits_its_taller_canvas() {
+        let ctx = Context::default();
+        let painter = Painter::new(ctx, LayerId::background(), Rect::EVERYTHING);
+        let rect = Rect::from_min_size(
+            pos2(0., 0.),
+            vec2(MOON_SIZE.x, Act::Bored(0.).canvas_height()),
+        );
+        for p in [0., 0.1, 0.25, 0.3, 0.5, 0.62, 0.8, 0.86, 0.9, 1.] {
+            moon(&painter, rect, "done", 0.5, Act::Bored(p));
+        }
+        let bounds = painter.ctx().graphics(|g| {
+            g.get(LayerId::background())
+                .map(|list| {
+                    list.all_entries()
+                        .map(|s| s.shape.visual_bounding_rect())
+                        .collect::<Vec<_>>()
+                })
+                .unwrap_or_default()
+        });
+        assert!(bounds.iter().any(|b| b.bottom() > MOON_SIZE.y));
         for b in bounds {
             assert!(rect.expand(1.).contains_rect(b), "{b:?}");
         }

@@ -25,7 +25,7 @@ Lulo ve las sesiones que corren en tu PC. Las sesiones en la nube, por SSH, en W
 
 - **Plegada:** la media luna con los ojos del pulpo, que cuelga de cabeza, y un punto de color por cada sesión activa. Los ojos siguen a la sesión que más te necesita.
 - **Al pasar el ratón:** aparece una ficha por sesión con su proyecto y su estado (pensando, editando, en el bash, esperando permiso, en segundo plano, terminó…).
-- **Clic derecho:** Iniciar con Windows y Cerrar Lulo.
+- **Clic derecho:** Iniciar con Windows y Cerrar Lulo. Sobre una sesión inactiva, también Quitar de la lista.
 - **Volver a abrirla:** busca «Lulo» en el menú Inicio.
 
 Los ajustes están en `%LOCALAPPDATA%\Lulo\widget.json`. Por ejemplo, `"animate": false` deja el pulpo quieto.

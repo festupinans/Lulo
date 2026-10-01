@@ -30,10 +30,11 @@ Desde una terminal también funcionan `lulo-hook.exe install`, `lulo-hook.exe un
 Haz doble clic en `lulo-widget.exe`. Aparece como una media luna oscura pegada al borde de arriba, en el centro de la pantalla, siempre encima y fuera de la barra de tareas.
 
 - **Plegada:** solo la media luna, sin texto. El pulpo cuelga de cabeza y asoma la coronilla y los ojos, y debajo hay un punto de color por cada sesión activa. Los ojos siguen a la sesión que más te necesita: miran a los lados si una espera, se vuelven X con un error, sonríen al terminar y se cierran si no hay actividad.
+- **Reacciones:** plegado, el pulpo sigue el ratón con la mirada cuando pasa cerca, guiña un ojo de vez en cuando mientras trabaja, celebra con papelitos cuando una sesión termina y se sobresalta cuando una empieza a esperarte. Si todo terminó hace 2 minutos se aburre y juega con un yo-yo. Con 3 clics seguidos sobre él se enoja, y con 5 se esconde en la luna y luego asoma un ojo. Nada de esto tapa un aviso de espera o de error.
 - **Al pasar el ratón:** debajo de la luna aparece una ficha por sesión (pulpo, proyecto, estado y barra de tareas hechas), sin marco ni fondo. Se vuelve a plegar al sacar el ratón.
 - **El pulpo de cada ficha:** hace la escena de ese estado. Piensa, teclea frente al PC, mira la terminal, busca con lupa, llama a pulpitos ayudantes, espera impaciente, salta al terminar, tiembla con un error y duerme si no hay actividad.
 - **Segundo plano:** si Claude termina su turno pero dejó comandos o subagentes corriendo en segundo plano, la sesión sale «En segundo plano» en vez de «Terminó», hasta que Claude Code avisa que acabaron.
-- **Menú (clic derecho):** "Iniciar con Windows" y "Cerrar Lulo".
+- **Menú (clic derecho):** "Iniciar con Windows" y "Cerrar Lulo". Sobre una sesión inactiva, también "Quitar de la lista".
 - **Inactiva:** una sesión sin eventos durante 5 minutos pasa a "Inactiva" y baja al final. "Esperando" nunca pasa a inactiva, porque necesita que respondas.
 - **Sesiones huérfanas:** si cierras una terminal sin `/exit`, Claude Code no envía `SessionEnd`. El widget borra esos archivos tras 12 horas sin eventos.
 - **Consumo:** el pulpo se anima a 12 cuadros por segundo plegado y a 30 desplegado. Con `"animate": false` queda quieto y el widget solo se redibuja cuando cambia un archivo de estado o el ratón está encima, más un refresco cada 15 s para los tiempos.
