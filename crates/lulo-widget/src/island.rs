@@ -57,6 +57,9 @@ mod tests {
             prompt: None,
             tasks: Vec::new(),
             background: 0,
+            since: None,
+            started: None,
+            claude_pid: None,
         }
     }
 

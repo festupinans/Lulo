@@ -14,10 +14,16 @@
 // No console window behind the widget on Windows.
 #![cfg_attr(windows, windows_subsystem = "windows")]
 
+mod alert;
 mod autostart;
+mod changes;
+mod cursor;
+mod display;
+mod focus;
 mod fonts;
 mod glass;
 mod island;
+mod mood;
 mod octopus;
 mod sessions;
 mod settings;
@@ -34,6 +40,8 @@ use eframe::egui::{
 };
 use notify::{RecursiveMode, Watcher};
 
+use display::Anchor;
+use octopus::Act;
 use sessions::Session;
 use settings::Settings;
 
@@ -57,15 +65,23 @@ const MAX_DOTS: usize = 10;
 // Open: the chips hang just under the moon.
 const ROW_GAP: f32 = 2.0;
 const COLUMNS: usize = 4;
-const CHIP_W: f32 = 144.0;
+const CHIP_W: f32 = 156.0;
 const CHIP_H: f32 = 50.0;
 const GAP: f32 = 6.0;
 const CHIP_OCTOPUS: f32 = 30.0;
+/// How close the mouse must be for the octopus to look at it (points).
+const NEAR_MOUSE: f32 = 260.0;
+/// Height of the eyes on the moon's canvas.
+const MOON_EYES_Y: f32 = 35.5;
 /// Window size needed while the right-click menu is open.
-const MENU_ROOM: Vec2 = vec2(190.0, 110.0);
+const MENU_ROOM: Vec2 = vec2(360.0, 230.0);
+/// How often to check for something full screen.
+const FULLSCREEN_POLL: Duration = Duration::from_secs(2);
 /// Solid backgrounds for the chips.
 const SOLID: Color32 = Color32::from_rgb(23, 23, 30);
 const SOLID_HOVER: Color32 = Color32::from_rgb(40, 40, 52);
+/// The time next to the state on a chip.
+const MUTED: Color32 = Color32::from_rgb(154, 154, 174);
 
 fn main() -> eframe::Result {
     let settings = Settings::load();
@@ -112,6 +128,14 @@ struct App {
     /// Session whose details are shown; stays while the mouse moves down to them.
     hovered: Option<String>,
     geometry: Option<(Pos2, Vec2)>,
+    mood: mood::Mood,
+    watch: changes::Watch,
+    alerts: alert::Alerts,
+    /// Monitors, re-read with the session files.
+    monitors: Vec<display::Monitor>,
+    /// Something full screen has the screen, and when that was checked.
+    fullscreen: bool,
+    fullscreen_at: Option<Instant>,
 }
 
 impl App {
@@ -124,6 +148,7 @@ impl App {
         fonts::install(&cc.egui_ctx);
         cc.egui_ctx.set_visuals(egui::Visuals::dark());
         glass::apply(cc);
+        alert::register();
         App {
             dir,
             sessions: Vec::new(),
@@ -136,6 +161,12 @@ impl App {
             last_inside: None,
             hovered: None,
             geometry: None,
+            mood: mood::Mood::default(),
+            watch: changes::Watch::default(),
+            alerts: alert::Alerts::start(),
+            monitors: display::monitors(),
+            fullscreen: false,
+            fullscreen_at: None,
         }
     }
 
@@ -157,13 +188,30 @@ impl App {
         }
     }
 
-    /// Centers the window at the top of the screen.
+    /// Sticks the window to the top edge of the chosen monitor, at the
+    /// chosen side.
     fn place_window(&mut self, ctx: &egui::Context, size: Vec2) {
-        let screen = ctx
-            .input(|i| i.viewport().monitor_size)
-            .unwrap_or(vec2(1920.0, 1080.0));
         let size = size.round();
-        let pos = pos2(((screen.x - size.x) / 2.0).max(0.0), 0.0).round();
+        let s = &self.settings;
+        let pos = match display::pick(&self.monitors, Some(s.monitor)) {
+            Some(m) => {
+                let size_px = (size.x * m.scale, size.y * m.scale);
+                let (x, y) = display::place(&self.monitors, Some(s.monitor), s.anchor, size_px)
+                    .unwrap_or_default();
+                // egui turns points into pixels with the scale of the
+                // monitor the window is on now; once it lands on another,
+                // the next frame places it again with that one's scale.
+                let ppp = ctx.pixels_per_point();
+                pos2(x / ppp, y / ppp).round()
+            }
+            // No monitor list off Windows: center on the current screen.
+            None => {
+                let screen = ctx
+                    .input(|i| i.viewport().monitor_size)
+                    .unwrap_or(vec2(1920.0, 1080.0));
+                pos2(((screen.x - size.x) / 2.0).max(0.0), 0.0).round()
+            }
+        };
         if self.geometry != Some((pos, size)) {
             ctx.send_viewport_cmd(egui::ViewportCommand::InnerSize(size));
             ctx.send_viewport_cmd(egui::ViewportCommand::OuterPosition(pos));
@@ -171,9 +219,79 @@ impl App {
         }
     }
 
+    /// Toasts and sounds for the sessions that just changed.
+    fn alert(&mut self, now: u64) {
+        let inactive_secs = self.settings.inactive_secs();
+        let rows: Vec<(&Session, &str)> = self
+            .sessions
+            .iter()
+            .map(|s| (s, s.shown_state(now, inactive_secs)))
+            .collect();
+        let events = self.watch.update(&rows);
+        let s = &self.settings;
+        let options = alert::Options {
+            toasts: s.notifications,
+            sounds: s.sounds,
+            new_session_sound: s.new_session_sound,
+        };
+        self.alerts.send(events, options);
+    }
+
+    /// The right-click menu: autostart, alerts and close.
+    fn menu(&mut self, ui: &mut egui::Ui) {
+        if autostart::SUPPORTED
+            && ui
+                .checkbox(&mut self.autostart, "Iniciar con Windows")
+                .changed()
+        {
+            autostart::set(self.autostart);
+            self.autostart = autostart::is_enabled();
+        }
+        let s = &mut self.settings;
+        let mut changed = ui
+            .checkbox(&mut s.notifications, "Avisos de Windows")
+            .changed();
+        changed |= ui.checkbox(&mut s.sounds, "Sonidos").changed();
+        changed |= ui
+            .checkbox(&mut s.hide_fullscreen, "Esconder en pantalla completa")
+            .changed();
+        if self.monitors.len() > 1 {
+            ui.menu_button("Pantalla", |ui| {
+                for i in 0..self.monitors.len() {
+                    let name = if self.monitors[i].primary {
+                        format!("Pantalla {} (principal)", i + 1)
+                    } else {
+                        format!("Pantalla {}", i + 1)
+                    };
+                    changed |= ui.radio_value(&mut s.monitor, i, name).changed();
+                }
+            });
+        }
+        ui.menu_button("Posición", |ui| {
+            for (anchor, name) in [
+                (Anchor::Left, "Izquierda"),
+                (Anchor::Center, "Centro"),
+                (Anchor::Right, "Derecha"),
+            ] {
+                changed |= ui.radio_value(&mut s.anchor, anchor, name).changed();
+            }
+        });
+        if changed {
+            s.save();
+        }
+        if ui.button("Cerrar Lulo").clicked() {
+            ui.ctx().send_viewport_cmd(egui::ViewportCommand::Close);
+        }
+    }
+
     /// Next frame for the animation, or just the slow tick when it is off.
     fn schedule_repaint(&self, ctx: &egui::Context, frame: Duration) {
-        ctx.request_repaint_after(if self.settings.animate { frame } else { TICK });
+        let idle = if self.settings.hide_fullscreen {
+            FULLSCREEN_POLL
+        } else {
+            TICK
+        };
+        ctx.request_repaint_after(if self.settings.animate { frame } else { idle });
     }
 }
 
@@ -213,8 +331,18 @@ impl eframe::App for App {
         if self.dirty.swap(false, Ordering::Relaxed) || stale {
             if let Some(dir) = &self.dir {
                 self.sessions = sessions::load(dir, now, self.settings.forget_secs());
+                self.alert(now);
             }
+            self.monitors = display::monitors();
             self.last_load = Some(Instant::now());
+        }
+        if self.settings.hide_fullscreen
+            && self
+                .fullscreen_at
+                .is_none_or(|t| t.elapsed() >= FULLSCREEN_POLL)
+        {
+            self.fullscreen = display::busy_fullscreen();
+            self.fullscreen_at = Some(Instant::now());
         }
         self.update_expanded(&ctx);
         // Still octopus when animations are off: a fixed moment of each scene.
@@ -241,23 +369,26 @@ impl eframe::App for App {
             self.hovered = None;
         }
 
+        // Out of the way of a video, game or presentation, unless a session
+        // needs you. The window stays (a hidden one stops getting frames, and
+        // this check with it), shrunk to one transparent pixel.
+        let needs_you = rows
+            .iter()
+            .any(|(_, st)| matches!(*st, "waiting" | "error"));
+        if self.settings.hide_fullscreen && self.fullscreen && !needs_you {
+            self.expanded = false;
+            self.place_window(&ctx, vec2(1.0, 1.0));
+            ctx.request_repaint_after(FULLSCREEN_POLL);
+            drop(rows);
+            self.sessions = sessions;
+            return;
+        }
+
         ui.visuals_mut().override_text_color = Some(Color32::WHITE);
         let full = ui.max_rect();
         // Right-click anywhere: autostart and close.
         let background = ui.interact(full, ui.id().with("bg"), Sense::click());
-        background.context_menu(|ui| {
-            if autostart::SUPPORTED
-                && ui
-                    .checkbox(&mut self.autostart, "Iniciar con Windows")
-                    .changed()
-            {
-                autostart::set(self.autostart);
-                self.autostart = autostart::is_enabled();
-            }
-            if ui.button("Cerrar Lulo").clicked() {
-                ctx.send_viewport_cmd(egui::ViewportCommand::Close);
-            }
-        });
+        background.context_menu(|ui| self.menu(ui));
 
         let state = island::focus(&rows);
         let active: Vec<&str> = rows
@@ -268,9 +399,33 @@ impl eframe::App for App {
         let open = self.expanded && !rows.is_empty();
         let moon = moon_size(active.len());
         let mut size = moon;
+
+        // Short reactions of the octopus on top of its state.
+        let act = if self.settings.animate {
+            let now = ctx.input(|i| i.time);
+            self.mood
+                .observe(rows.iter().map(|(s, st)| (s.id.as_str(), *st)), state, now);
+            let eyes = pos2(moon.x / 2.0, MOON_EYES_Y * moon.x / octopus::MOON_SIZE.x);
+            let look = if open { None } else { nearby_mouse(&ctx, eyes) };
+            self.mood.act(state, now, !open, look)
+        } else {
+            Act::None
+        };
+
         if open {
-            size = self.draw_open(ui, full.min, moon, &rows, t);
+            size = self.draw_open(ui, full.min, moon, &rows, t, now);
+        } else {
+            // The yo-yo hangs below the moon's usual canvas.
+            size.y = moon.y * act.canvas_height() / octopus::MOON_SIZE.y;
         }
+        // Clicks on the moon count toward annoying the octopus.
+        let moon_rect =
+            Rect::from_min_size(pos2(full.min.x + (size.x - moon.x) / 2.0, full.min.y), moon);
+        let poke = ui.interact(moon_rect, ui.id().with("moon"), Sense::click());
+        if poke.clicked() {
+            self.mood.click(ctx.input(|i| i.time));
+        }
+        poke.context_menu(|ui| self.menu(ui));
         // Last, so the moon and the peeking head sit over everything else.
         draw_moon(
             ui.painter(),
@@ -280,6 +435,7 @@ impl eframe::App for App {
             &active,
             state,
             t,
+            act,
         );
         // Room for the right-click menu, which draws inside the window.
         if egui::Popup::is_any_open(&ctx) {
@@ -299,6 +455,16 @@ impl eframe::App for App {
     }
 }
 
+/// Direction from the octopus's eyes (`eyes`, in window points) to the mouse
+/// when it is near the widget but outside it.
+fn nearby_mouse(ctx: &egui::Context, eyes: Pos2) -> Option<Vec2> {
+    let (x, y) = cursor::screen_px()?;
+    let (outer, ppp) = ctx.input(|i| (i.viewport().outer_rect, i.pixels_per_point));
+    let d = pos2(x / ppp, y / ppp) - (outer?.min + eyes.to_vec2());
+    let dist = d.length();
+    (dist > 1.0 && dist < NEAR_MOUSE).then(|| d / dist)
+}
+
 /// Size of the half moon: wider only when many dots need room.
 fn moon_size(dots: usize) -> Vec2 {
     let row = dots.min(MAX_DOTS).saturating_sub(1) as f32 * DOT_STEP;
@@ -307,6 +473,7 @@ fn moon_size(dots: usize) -> Vec2 {
 }
 
 /// The half moon centered on `center_x`, with one dot per active session.
+#[allow(clippy::too_many_arguments)]
 fn draw_moon(
     painter: &Painter,
     center_x: f32,
@@ -315,9 +482,10 @@ fn draw_moon(
     active: &[&str],
     state: &str,
     t: f64,
+    act: Act,
 ) {
     let moon = Rect::from_min_size(pos2(center_x - size.x / 2.0, top), size);
-    octopus::moon(painter, moon, state, t);
+    octopus::moon(painter, moon, state, t, act);
     let dots = active.len().min(MAX_DOTS);
     let y = top + octopus::MOON_DOTS_Y * size.x / octopus::MOON_SIZE.x;
     let mut x = center_x - dots.saturating_sub(1) as f32 * DOT_STEP / 2.0;
@@ -339,6 +507,7 @@ impl App {
         moon: Vec2,
         rows: &[(&Session, &str)],
         t: f64,
+        now: u64,
     ) -> Vec2 {
         let cols = rows.len().clamp(1, COLUMNS);
         let lines = rows.len().div_ceil(COLUMNS);
@@ -350,6 +519,7 @@ impl App {
 
         let x = origin.x + (width - row_w) / 2.0;
         let mut hovered = self.hovered.clone();
+        let mut forget = None;
         for (i, (s, st)) in rows.iter().enumerate() {
             let (col, line) = (i % COLUMNS, i / COLUMNS);
             let chip = Rect::from_min_size(
@@ -359,22 +529,39 @@ impl App {
                 ),
                 vec2(CHIP_W, CHIP_H),
             );
-            if ui
-                .interact(chip, ui.id().with(("chip", &s.id)), Sense::hover())
-                .hovered()
-            {
+            // A click brings the session's window to the front. The right
+            // click opens the menu, which also offers to drop inactive ones.
+            let response = ui.interact(chip, ui.id().with(("chip", &s.id)), Sense::click());
+            if response.hovered() {
                 hovered = Some(s.id.clone());
             }
+            if response.clicked() {
+                focus::bring_to_front(s.claude_pid);
+            }
+            response.context_menu(|ui| {
+                if *st == "inactive" {
+                    if ui.button("Quitar de la lista").clicked() {
+                        forget = Some(s.id.clone());
+                    }
+                    ui.separator();
+                }
+                self.menu(ui);
+            });
             let on = hovered.as_deref() == Some(s.id.as_str());
-            draw_chip(ui.painter(), chip, s, st, on, t);
+            draw_chip(ui.painter(), chip, s, st, on, t, now);
         }
         self.hovered = hovered;
+        if let (Some(id), Some(dir)) = (forget, &self.dir) {
+            sessions::forget(dir, &id);
+            self.dirty.store(true, Ordering::Relaxed);
+            ui.ctx().request_repaint();
+        }
         size
     }
 }
 
 /// One session: its octopus, name, state and task progress.
-fn draw_chip(painter: &Painter, rect: Rect, s: &Session, state: &str, on: bool, t: f64) {
+fn draw_chip(painter: &Painter, rect: Rect, s: &Session, state: &str, on: bool, t: f64, now: u64) {
     painter.rect(
         rect,
         CornerRadius::same(14),
@@ -389,11 +576,17 @@ fn draw_chip(painter: &Painter, rect: Rect, s: &Session, state: &str, on: bool, 
 
     let text_x = mascot.right() + 8.0;
     let text_w = (inner.right() - text_x).max(10.0);
+    // How long it has been in this state, small at the top right; the
+    // name gets what is left of the line.
+    let time = s.elapsed(state, now).map(|secs| {
+        painter.layout_no_wrap(sessions::duration(secs), FontId::proportional(10.5), MUTED)
+    });
+    let time_w = time.as_ref().map_or(0.0, |g| g.size().x + 6.0);
     let name = painter.layout_job(one_line(
         &s.project,
         fonts::semibold(13.5),
         Color32::WHITE,
-        text_w,
+        (text_w - time_w).max(10.0),
     ));
     let label = painter.layout_job(one_line(
         sessions::label(state),
@@ -404,6 +597,11 @@ fn draw_chip(painter: &Painter, rect: Rect, s: &Session, state: &str, on: bool, 
     let block = name.size().y + label.size().y;
     let y = mascot.center().y - block / 2.0;
     let name_h = name.size().y;
+    if let Some(time) = time {
+        // Sits on the name's baseline.
+        let ty = y + name_h - time.size().y - 1.0;
+        painter.galley(pos2(inner.right() - time.size().x, ty), time, MUTED);
+    }
     painter.galley(pos2(text_x, y), name, Color32::WHITE);
     painter.galley(pos2(text_x, y + name_h), label, look.color);
 

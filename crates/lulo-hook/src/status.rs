@@ -8,6 +8,7 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use serde_json::Value;
 
+use crate::origin;
 use crate::progress;
 use crate::state::{self, Action};
 
@@ -52,7 +53,11 @@ pub fn apply(dir: &Path, input: &Value) -> io::Result<()> {
         .ok()
         .and_then(|text| serde_json::from_str::<Value>(&text).ok());
     match progress::merge(prev, input, &action, now_secs()) {
-        Some(record) => write_atomic(dir, &file, &record),
+        Some(mut record) => {
+            let event = input.get("hook_event_name").and_then(Value::as_str);
+            origin::stamp(&mut record, event.unwrap_or(""));
+            write_atomic(dir, &file, &record)
+        }
         None => Ok(()),
     }
 }

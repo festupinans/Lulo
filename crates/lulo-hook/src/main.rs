@@ -6,6 +6,7 @@
 //! parse it) and never fails the hook.
 
 mod install;
+mod origin;
 mod progress;
 mod state;
 mod status;

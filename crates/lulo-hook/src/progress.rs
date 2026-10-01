@@ -30,6 +30,7 @@ pub fn merge(prev: Option<Value>, input: &Value, action: &Action, now: u64) -> O
     let tasks_changed = update_tasks(&mut rec, input) | update_background(&mut rec, input);
     match action {
         Action::Write { state, detail } => {
+            let prev_state = rec.get("state").cloned();
             rec.insert("session_id".into(), json!(str_field(input, "session_id")));
             // Each event carries the shell's current folder, which follows a
             // `cd`. The project is the folder the session started in.
@@ -49,6 +50,10 @@ pub fn merge(prev: Option<Value>, input: &Value, action: &Action, now: u64) -> O
                 rec.insert("detail".into(), first);
             }
             rec.insert("event".into(), json!(event));
+            // When the shown state began, so the widget can say for how long.
+            if rec.get("state") != prev_state.as_ref() || !rec.contains_key("since") {
+                rec.insert("since".into(), json!(now));
+            }
 
             if event == "UserPromptSubmit" {
                 let prompt = str_field(input, "prompt")
@@ -637,5 +642,44 @@ mod tests {
         assert!(r.get("prompt").is_none());
         assert!(r.get("tasks").is_none());
         assert_eq!(r["state"], "ready");
+    }
+
+    #[test]
+    fn since_marks_when_the_state_began() {
+        let r = step(None, ev("SessionStart", json!({})), 1).unwrap();
+        assert_eq!(r["since"], 1);
+        let r = step(Some(r), ev("UserPromptSubmit", json!({ "prompt": "x" })), 5).unwrap();
+        assert_eq!(
+            (r["state"].as_str(), r["since"].as_u64()),
+            (Some("thinking"), Some(5))
+        );
+        // Another event with the same state keeps the start.
+        let r = step(
+            Some(r),
+            ev("PostToolUse", json!({ "tool_name": "Read" })),
+            9,
+        )
+        .unwrap();
+        assert_eq!(r["since"], 5);
+        let r = step(
+            Some(r),
+            ev("PermissionRequest", json!({ "tool_name": "Bash" })),
+            12,
+        )
+        .unwrap();
+        assert_eq!(
+            (r["state"].as_str(), r["since"].as_u64()),
+            (Some("waiting"), Some(12))
+        );
+        // Files written by an older hook have no `since`: it starts now.
+        let mut old = r.clone();
+        old.as_object_mut().unwrap().remove("since");
+        let r = step(
+            Some(old),
+            ev("PermissionRequest", json!({ "tool_name": "Bash" })),
+            20,
+        )
+        .unwrap();
+        assert_eq!(r["since"], 20);
     }
 }
