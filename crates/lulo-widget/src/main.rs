@@ -588,12 +588,21 @@ fn draw_chip(painter: &Painter, rect: Rect, s: &Session, state: &str, on: bool, 
         Color32::WHITE,
         (text_w - time_w).max(10.0),
     ));
-    let label = painter.layout_job(one_line(
+    let mut label = one_line(
         sessions::label(state),
         fonts::semibold(11.5),
         look.color,
         text_w,
-    ));
+    );
+    // Work left running in the background while Claude does something else.
+    if let Some(extra) = sessions::background_note(s, state) {
+        label.append(
+            &extra,
+            0.0,
+            TextFormat::simple(fonts::semibold(11.5), style::look("background").color),
+        );
+    }
+    let label = painter.layout_job(label);
     let block = name.size().y + label.size().y;
     let y = mascot.center().y - block / 2.0;
     let name_h = name.size().y;

@@ -157,6 +157,18 @@ pub fn label(state: &str) -> &'static str {
     }
 }
 
+/// What follows the state's label on a chip when background work is still
+/// running: " · +2" next to a busy state (in the background color), " (2)" next to
+/// "En segundo plano" when there is more than one.
+pub fn background_note(s: &Session, shown: &str) -> Option<String> {
+    match (shown, s.background) {
+        (_, 0) | ("inactive", _) => None,
+        ("background", 1) => None,
+        ("background", n) => Some(format!(" ({n})")),
+        (_, n) => Some(format!(" · +{n}")),
+    }
+}
+
 /// Same folder `lulo-hook` writes to (kept in sync with its `status_dir`).
 pub fn status_dir() -> Option<PathBuf> {
     let env = |k: &str| {
@@ -271,6 +283,21 @@ mod tests {
         assert_eq!(duration(4 * 60 + 5), "4 min");
         assert_eq!(duration(3600 + 12 * 60), "1 h 12");
         assert_eq!(duration(2 * 3600 + 30), "2 h");
+    }
+
+    #[test]
+    fn background_work_is_noted_on_the_chip() {
+        let mut s = Session::parse(
+            r#"{"session_id":"a","state":"thinking","ts":1,"background":[{"kind":"shell"},{"kind":"monitor"}]}"#,
+        )
+        .unwrap();
+        assert_eq!(background_note(&s, "thinking").as_deref(), Some(" · +2"));
+        assert_eq!(background_note(&s, "background").as_deref(), Some(" (2)"));
+        assert_eq!(background_note(&s, "inactive"), None);
+        s.background = 1;
+        assert_eq!(background_note(&s, "background"), None);
+        s.background = 0;
+        assert_eq!(background_note(&s, "thinking"), None);
     }
 
     #[test]
