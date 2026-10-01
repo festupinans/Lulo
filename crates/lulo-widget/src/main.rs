@@ -588,11 +588,22 @@ fn draw_chip(painter: &Painter, rect: Rect, s: &Session, state: &str, on: bool, 
         Color32::WHITE,
         (text_w - time_w).max(10.0),
     ));
+    // Shells, watches and subagents running beside the main work, as a
+    // small count after the state. "background" already says so, and a
+    // subagent in the foreground is the state itself.
+    let extra = (s.background > 0 && !matches!(state, "background" | "subagent")).then(|| {
+        painter.layout_no_wrap(
+            format!("+{}", s.background),
+            FontId::proportional(10.5),
+            style::look("background").color,
+        )
+    });
+    let extra_w = extra.as_ref().map_or(0.0, |g| g.size().x + 14.0);
     let label = painter.layout_job(one_line(
         sessions::label(state),
         fonts::semibold(11.5),
         look.color,
-        text_w,
+        (text_w - extra_w).max(10.0),
     ));
     let block = name.size().y + label.size().y;
     let y = mascot.center().y - block / 2.0;
@@ -603,6 +614,15 @@ fn draw_chip(painter: &Painter, rect: Rect, s: &Session, state: &str, on: bool, 
         painter.galley(pos2(inner.right() - time.size().x, ty), time, MUTED);
     }
     painter.galley(pos2(text_x, y), name, Color32::WHITE);
+    if let Some(extra) = extra {
+        let ey = y + name_h + label.size().y - extra.size().y - 1.0;
+        let ex = inner.right() - extra.size().x;
+        // A small pulsing dot: something keeps running on its own.
+        let pulse = 0.65 + 0.35 * (t * 3.0).sin() as f32;
+        let dot = style::look("background").color.gamma_multiply(pulse);
+        painter.circle_filled(pos2(ex - 5.0, ey + extra.size().y / 2.0 + 0.5), 2.6, dot);
+        painter.galley(pos2(ex, ey), extra, MUTED);
+    }
     painter.galley(pos2(text_x, y + name_h), label, look.color);
 
     let bar = Rect::from_min_max(
