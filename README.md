@@ -1,6 +1,16 @@
-# Lulo
+# Lulo el Pulpo
 
-Widget para Windows, siempre visible, que muestra en tiempo real el estado de todas tus sesiones de Claude Code: pensando, editando, en el bash, leyendo, con un subagente, esperando permiso o terminada.
+![Lulo el Pulpo: te aviso qué hace cada sesión de Claude Code](docs/img/portada.png)
+
+Un pulpo que vive en el borde de arriba de tu pantalla y te avisa qué está haciendo cada sesión de Claude Code: pensando, editando, en el bash, leyendo, con un subagente, esperando permiso o terminada. Es un widget para Windows, siempre visible, gratis y de código abierto.
+
+**[Descargar Lulo-Setup.exe](https://github.com/festupinans/Lulo/releases/latest)** · [Guía de instalación](INSTALACION.md)
+
+> Lulo es un proyecto independiente, no afiliado a Anthropic ni respaldado por ella. Claude y Claude Code son marcas de Anthropic.
+
+El instalador no está firmado, así que Windows puede mostrar el aviso de SmartScreen la primera vez. Todo el código está en este repositorio para que puedas revisarlo o compilarlo tú mismo.
+
+![Un pulpo por estado: pensando, editando, en el bash, esperándote, terminó y error](docs/img/estados.png)
 
 Funciona con [hooks de Claude Code](https://code.claude.com/docs/en/hooks): cada evento ejecuta `lulo-hook.exe`, que escribe el estado de la sesión en `%LOCALAPPDATA%\claude-status\<session_id>.json`. `lulo-widget.exe` vigila esa carpeta y muestra un punto y una ficha por sesión.
 
@@ -100,3 +110,7 @@ cargo clippy --all-targets -- -D warnings
 ```
 
 `LULO_STATUS_DIR` cambia la carpeta de estado (útil en pruebas). Fuera de Windows se usa `~/.local/state/claude-status`.
+
+## Licencia
+
+[MIT](LICENSE). Puedes usar, copiar, modificar y distribuir Lulo libremente, manteniendo el aviso de copyright.
