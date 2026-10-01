@@ -17,6 +17,7 @@ pub const EVENTS: &[&str] = &[
     "PostToolUseFailure",
     "PermissionRequest",
     "Notification",
+    "SubagentStart",
     "SubagentStop",
     "TaskCreated",
     "TaskCompleted",
