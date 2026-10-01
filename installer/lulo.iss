@@ -41,6 +41,7 @@ Compression=lzma2/max
 SolidCompression=yes
 WizardStyle=modern
 WizardSizePercent=100
+SetupIconFile=..\assets\lulo.ico
 ShowLanguageDialog=no
 UninstallDisplayName=Lulo
 UninstallDisplayIcon={app}\lulo-widget.exe

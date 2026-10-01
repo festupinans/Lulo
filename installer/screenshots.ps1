@@ -22,6 +22,10 @@ function Shot($name) {
     $g = [System.Drawing.Graphics]::FromImage($bmp)
     $g.CopyFromScreen($b.Location, [System.Drawing.Point]::Empty, $b.Size)
     $bmp.Save((Join-Path $OutDir "$name.png"), [System.Drawing.Imaging.ImageFormat]::Png)
+    # TEMP: echo a JPEG copy into the log for reviewers who can't download artifacts.
+    $ms = New-Object System.IO.MemoryStream
+    $bmp.Save($ms, [System.Drawing.Imaging.ImageFormat]::Jpeg)
+    Write-Host "SHOT:$name`:$([Convert]::ToBase64String($ms.ToArray()))"
     $g.Dispose(); $bmp.Dispose()
 }
 
