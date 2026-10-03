@@ -5,6 +5,7 @@
 //! write one small file, exit 0. It never prints to stdout (Claude Code would
 //! parse it) and never fails the hook.
 
+mod info;
 mod install;
 mod origin;
 mod progress;

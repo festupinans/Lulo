@@ -95,6 +95,16 @@ pub fn classify(input: &Value) -> Action {
                 Action::Ignore
             }
         }
+        // An MCP server asks the person something in the middle of a tool.
+        "Elicitation" => write(
+            State::Waiting,
+            crate::info::elicitation_text(input)
+                .or_else(|| str_field(input, "server_name").map(str::to_string)),
+        ),
+        "ElicitationResult" => write(
+            State::Tool,
+            str_field(input, "server_name").map(str::to_string),
+        ),
         "Stop" => write(State::Done, None),
         "StopFailure" => write(State::Error, None),
         "SessionEnd" => Action::Remove,
@@ -114,7 +124,7 @@ pub fn tool_state(tool: &str) -> State {
 }
 
 /// A short human hint for the widget: the file being edited, the command, etc.
-fn tool_detail(tool: &str, tool_input: Option<&Value>) -> Option<String> {
+pub fn tool_detail(tool: &str, tool_input: Option<&Value>) -> Option<String> {
     let input = tool_input?;
     let field = |k: &str| str_field(input, k);
     let detail = match tool_state(tool) {
@@ -291,6 +301,16 @@ mod tests {
         assert_eq!(
             classify(&json!({ "hook_event_name": "PreCompact" })),
             Action::Ignore
+        );
+        assert_eq!(
+            classify(&json!({ "hook_event_name": "PermissionDenied", "tool_name": "Bash" })),
+            Action::Ignore
+        );
+        assert_eq!(
+            classify(
+                &json!({ "hook_event_name": "Elicitation", "server_name": "github", "message": "Elige" })
+            ),
+            write(State::Waiting, Some("Elige".into()))
         );
         assert_eq!(classify(&json!({})), Action::Ignore);
     }

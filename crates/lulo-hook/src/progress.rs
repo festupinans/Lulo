@@ -6,6 +6,7 @@
 
 use serde_json::{json, Map, Value};
 
+use crate::info;
 use crate::state::{self, Action};
 
 /// Steps kept per prompt; older ones are dropped.
@@ -27,7 +28,9 @@ pub fn merge(prev: Option<Value>, input: &Value, action: &Action, now: u64) -> O
         _ => Map::new(),
     };
 
-    let tasks_changed = update_tasks(&mut rec, input) | update_background(&mut rec, input);
+    let tasks_changed = update_tasks(&mut rec, input)
+        | update_background(&mut rec, input)
+        | info::update(&mut rec, input, now);
     match action {
         Action::Write { state, detail } => {
             let prev_state = rec.get("state").cloned();
@@ -48,6 +51,10 @@ pub fn merge(prev: Option<Value>, input: &Value, action: &Action, now: u64) -> O
                 let first = pending[0].get("detail").cloned().unwrap_or(Value::Null);
                 rec.insert("state".into(), json!("background"));
                 rec.insert("detail".into(), first);
+            }
+            // The MCP question is answered once the session moves on.
+            if rec.get("state").and_then(Value::as_str) != Some("waiting") {
+                rec.remove("question");
             }
             rec.insert("event".into(), json!(event));
             // When the shown state began, so the widget can say for how long.
@@ -895,6 +902,62 @@ mod tests {
         assert!(r.get("prompt").is_none());
         assert!(r.get("tasks").is_none());
         assert_eq!(r["state"], "ready");
+    }
+
+    #[test]
+    fn detail_facts_ride_along() {
+        let r = step(
+            None,
+            ev(
+                "SessionStart",
+                json!({ "model": "claude-opus-4-8", "permission_mode": "default" }),
+            ),
+            1,
+        )
+        .unwrap();
+        assert_eq!(r["model"], "claude-opus-4-8");
+        // An event that changes no state still records a denial.
+        let r = step(
+            Some(r),
+            ev(
+                "PermissionDenied",
+                json!({ "tool_name": "Bash", "tool_input": { "command": "rm x" } }),
+            ),
+            2,
+        )
+        .unwrap();
+        assert_eq!(
+            (r["state"].as_str(), r["denied"]["detail"].as_str()),
+            (Some("ready"), Some("rm x"))
+        );
+        // The MCP question stays while waiting and goes when work resumes.
+        let r = step(
+            Some(r),
+            ev(
+                "Elicitation",
+                json!({ "server_name": "github", "message": "Elige" }),
+            ),
+            3,
+        )
+        .unwrap();
+        assert_eq!(
+            (r["state"].as_str(), r["question"]["text"].as_str()),
+            (Some("waiting"), Some("Elige"))
+        );
+        let r = step(
+            Some(r),
+            ev("ElicitationResult", json!({ "server_name": "github" })),
+            4,
+        )
+        .unwrap();
+        assert!(r.get("question").is_none());
+        // Never invents a session from these alone.
+        assert!(step(
+            None,
+            ev("PermissionDenied", json!({ "tool_name": "Bash" })),
+            5
+        )
+        .is_none());
     }
 
     #[test]

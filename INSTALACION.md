@@ -26,7 +26,8 @@ Lulo ve las sesiones que corren en tu PC. Las sesiones en la nube (claude.ai en 
 - **Plegada:** la media luna con los ojos del pulpo, que cuelga de cabeza, y un punto de color por cada sesión activa. Los ojos siguen a la sesión que más te necesita.
 - **Al pasar el ratón:** aparece una ficha por sesión con su proyecto, su estado (pensando, editando, leyendo, en el bash, subagente, esperando permiso, terminó, error, inactiva…) y cuánto tiempo lleva en él.
 - **Tareas en segundo plano:** si una sesión tiene comandos o monitores corriendo aparte, su ficha muestra un punto morado y cuántos son («+1», «+2»…).
-- **Clic en una ficha:** trae al frente la ventana de esa sesión.
+- **Clic en una ficha:** abre el detalle de esa sesión (modelo, modo de permisos, CPU y RAM, tareas y avisos). Otro clic lo cierra.
+- **Doble clic en una ficha, o «Ir a la sesión»:** trae al frente la ventana de esa sesión.
 - **Avisos:** una notificación y un sonido cuando una sesión te espera, termina o falla.
 - **Clic derecho:** Iniciar con Windows, Avisos de Windows, Sonidos, Esconder en pantalla completa, Pantalla, Posición y Cerrar Lulo. Sobre una sesión inactiva, también Quitar de la lista.
 - **Volver a abrirla:** busca «Lulo» en el menú Inicio.
