@@ -179,9 +179,7 @@ pub fn draw(
             );
         };
         part(&mut job, "CPU ", false);
-        let cpu = u
-            .cpu
-            .map_or("…".to_string(), |c| format!("{}%", c.round() as u32));
+        let cpu = u.cpu.map_or("…".to_string(), procinfo::percent);
         part(&mut job, &cpu, true);
         part(&mut job, "     RAM ", false);
         part(&mut job, &procinfo::bytes(u.ram), true);

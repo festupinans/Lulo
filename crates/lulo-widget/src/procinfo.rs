@@ -80,6 +80,16 @@ pub fn bytes(n: u64) -> String {
     }
 }
 
+/// "12%", and one decimal below 10 so light work doesn't read as idle:
+/// "0,4%". Task Manager uses the same scale (share of the whole machine).
+pub fn percent(cpu: f32) -> String {
+    if cpu < 9.95 {
+        format!("{cpu:.1}%").replace('.', ",")
+    } else {
+        format!("{}%", cpu.round() as u32)
+    }
+}
+
 #[cfg(windows)]
 mod imp {
     use std::collections::HashMap;
@@ -186,5 +196,8 @@ mod tests {
     fn readable_sizes() {
         assert_eq!(bytes(410 * 1024 * 1024), "410 MB");
         assert_eq!(bytes(1258 * 1024 * 1024), "1,2 GB");
+        assert_eq!(percent(0.04), "0,0%");
+        assert_eq!(percent(0.36), "0,4%");
+        assert_eq!(percent(12.4), "12%");
     }
 }
