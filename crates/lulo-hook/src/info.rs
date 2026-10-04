@@ -22,12 +22,22 @@ pub fn update(rec: &mut Map<String, Value>, input: &Value, now: u64) -> bool {
         rec.insert("effort".into(), json!(effort));
     }
 
+    // What the transcript says (added by `transcript::enrich`): the model
+    // that answered last and the session's current title.
+    if let Some(model) = str_field(input, "lulo_model") {
+        rec.insert("model".into(), json!(model));
+    }
+    if let Some(title) = str_field(input, "lulo_title") {
+        rec.insert("title".into(), json!(clip(title)));
+    }
+
     match event {
         "SessionStart" => {
             if let Some(model) = input.get("model").and_then(model_name) {
                 rec.insert("model".into(), json!(model));
             }
-            if let Some(title) = str_field(input, "session_title").filter(|t| !t.is_empty()) {
+            let title = str_field(input, "session_title").filter(|t| !t.is_empty());
+            if let Some(title) = title.filter(|_| input.get("lulo_title").is_none()) {
                 rec.insert("title".into(), json!(clip(title)));
             }
         }
