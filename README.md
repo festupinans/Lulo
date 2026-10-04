@@ -16,7 +16,7 @@ El instalador no está firmado, así que Windows puede mostrar el aviso de Smart
 
 ## Así se ve
 
-Lulo es una media luna oscura pegada al borde de arriba de la pantalla. El pulpo cuelga de cabeza y asoma solo los ojos, y debajo hay un punto de color por cada sesión. Al pasar el ratón se abre una ficha por sesión, con su proyecto, su estado, el tiempo que lleva y la barra de tareas.
+Lulo es una media luna oscura pegada al borde de arriba de la pantalla. El pulpo cuelga de cabeza y asoma solo los ojos, y debajo hay un punto de color por cada sesión. Al pasar el ratón se abre una ficha por sesión, con su proyecto, su estado y el tiempo que lleva. Un clic en una ficha abre el detalle de esa sesión.
 
 <p align="center">
   <img src="docs/img/abierto.gif" width="880" alt="Lulo abierto con seis sesiones: pensando, editando, bash, esperando, terminó y error">
@@ -106,8 +106,9 @@ Haz doble clic en `lulo-widget.exe`. Aparece como una media luna oscura pegada a
 
 - **Plegada:** solo la media luna, sin texto. El pulpo cuelga de cabeza y asoma la coronilla y los ojos, y debajo hay un punto de color por cada sesión activa. Los ojos siguen a la sesión que más te necesita: miran a los lados si una espera, se vuelven X con un error, sonríen al terminar y se cierran si no hay actividad.
 - **Reacciones:** plegado, el pulpo sigue el ratón con la mirada cuando pasa cerca, guiña un ojo de vez en cuando mientras trabaja, celebra con papelitos cuando una sesión termina y se sobresalta cuando una empieza a esperarte. Si todo terminó hace 2 minutos se aburre y juega con un yo-yo. Con 3 clics seguidos sobre él se enoja, y con 5 se esconde en la luna y luego asoma un ojo. Nada de esto tapa un aviso de espera o de error.
-- **Al pasar el ratón:** debajo de la luna aparece una ficha por sesión (pulpo, proyecto, estado, tiempo en ese estado y barra de tareas hechas), sin marco ni fondo. Se vuelve a plegar al sacar el ratón. El tiempo cuenta desde que enviaste el pedido mientras Claude trabaja, y desde el cambio de estado cuando espera, termina o falla.
-- **Clic en una ficha:** trae al frente la ventana de esa sesión: la terminal donde corre o la app de escritorio de Claude. Dentro de la app no elige la sesión exacta.
+- **Al pasar el ratón:** debajo de la luna aparece una ficha por sesión (pulpo, proyecto, estado, tiempo en ese estado y, si Claude lleva lista de tareas, una barra con las hechas), sin marco ni fondo. Se vuelve a plegar al sacar el ratón. El tiempo cuenta desde que enviaste el pedido mientras Claude trabaja, y desde el cambio de estado cuando espera, termina o falla.
+- **Clic en una ficha:** abre debajo un panel con el detalle de la sesión: título, modelo, esfuerzo, modo de permisos, CPU y RAM (de Claude y todo lo que lanzó), lo último que el modo auto le negó, la pregunta de un servidor MCP y la lista de tareas. Cada parte aparece solo si hay datos. Otro clic lo cierra.
+- **Doble clic en una ficha, o «Ir a la sesión» en el panel:** trae al frente la ventana de esa sesión: la terminal donde corre o la app de escritorio de Claude. Dentro de la app no elige la sesión exacta.
 - **Avisos y sonidos:** cuando una sesión pasa a "Esperando", termina o da error, sale una notificación de Windows y suena Burbujas, Plop o Glub. Con No molestar activo, o con algo en pantalla completa, no suena. Nunca suena más de una vez cada 2 s.
 - **Pantalla completa:** con un video, un juego o una presentación en pantalla completa la luna se esconde, y vuelve sola si una sesión espera o falla.
 - **El pulpo de cada ficha:** hace la escena de ese estado. Piensa, teclea frente al PC, mira la terminal, busca con lupa, llama a pulpitos ayudantes, espera impaciente, salta al terminar, tiembla con un error y duerme si no hay actividad.
@@ -129,7 +130,7 @@ La configuración está en `%LOCALAPPDATA%\Lulo\widget.json`:
 
 ### Sobre la lista de tareas
 
-La lista sale de las herramientas de tareas de Claude Code (`TaskCreate`/`TaskUpdate`, o `TodoWrite` en versiones antiguas). En los modelos más nuevos Claude Code no las activa por defecto, así que la barra de la ficha queda vacía hasta que la sesión termina. Para activarlas, arranca Claude Code con la variable de entorno `CLAUDE_CODE_ENABLE_TODO_TOOLS=1` (por ejemplo, `setx CLAUDE_CODE_ENABLE_TODO_TOOLS 1` en Windows y reinicia la terminal).
+La lista sale de las herramientas de tareas de Claude Code (`TaskCreate`/`TaskUpdate`, o `TodoWrite` en versiones antiguas). En los modelos más nuevos Claude Code no las activa por defecto, así que la ficha no muestra barra ni el panel muestra tareas. Para activarlas, arranca Claude Code con la variable de entorno `CLAUDE_CODE_ENABLE_TODO_TOOLS=1` (por ejemplo, `setx CLAUDE_CODE_ENABLE_TODO_TOOLS 1` en Windows y reinicia la terminal).
 
 ## Archivo de estado
 

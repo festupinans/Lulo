@@ -5,11 +5,13 @@
 //! write one small file, exit 0. It never prints to stdout (Claude Code would
 //! parse it) and never fails the hook.
 
+mod info;
 mod install;
 mod origin;
 mod progress;
 mod state;
 mod status;
+mod transcript;
 
 use std::io::{IsTerminal, Read};
 use std::path::{Path, PathBuf};
@@ -80,7 +82,7 @@ fn run_hook() {
     // Tools that feed stdin from .NET or PowerShell may prepend a UTF-8 BOM,
     // which serde rejects.
     let json = raw.strip_prefix(b"\xEF\xBB\xBF").unwrap_or(&raw);
-    let input = match serde_json::from_slice(json) {
+    let mut input = match serde_json::from_slice(json) {
         Ok(v) => v,
         Err(e) => {
             // Stderr is only shown in Claude Code's debug output for exit 0.
@@ -88,6 +90,7 @@ fn run_hook() {
             return;
         }
     };
+    transcript::enrich(&mut input);
     let Some(dir) = status::status_dir() else {
         eprintln!("lulo-hook: could not determine the status folder");
         return;

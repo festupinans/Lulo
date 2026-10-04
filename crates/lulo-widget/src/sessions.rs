@@ -25,6 +25,20 @@ pub struct Session {
     pub started: Option<u64>,
     /// The Claude Code process, to bring its window to the front.
     pub claude_pid: Option<u32>,
+    /// What the detail panel shows; any of it can be missing.
+    pub info: Info,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct Info {
+    pub title: Option<String>,
+    pub model: Option<String>,
+    pub permission_mode: Option<String>,
+    pub effort: Option<String>,
+    /// The last call auto mode denied: tool, what it was, when.
+    pub denied: Option<(String, Option<String>, u64)>,
+    /// An MCP server asking the person something: server and question.
+    pub question: Option<(String, Option<String>)>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -66,6 +80,24 @@ impl Session {
                 .get("claude_pid")
                 .and_then(Value::as_u64)
                 .and_then(|p| u32::try_from(p).ok()),
+            info: Info {
+                title: s("title").filter(|t| !t.is_empty()),
+                model: s("model").filter(|m| !m.is_empty()),
+                permission_mode: s("permission_mode").filter(|m| !m.is_empty()),
+                effort: s("effort").filter(|e| !e.is_empty()),
+                denied: v.get("denied").and_then(|d| {
+                    let field = |k: &str| d.get(k).and_then(Value::as_str).map(str::to_string);
+                    Some((
+                        field("tool")?,
+                        field("detail"),
+                        d.get("ts").and_then(Value::as_u64).unwrap_or(0),
+                    ))
+                }),
+                question: v.get("question").and_then(|q| {
+                    let field = |k: &str| q.get(k).and_then(Value::as_str).map(str::to_string);
+                    Some((field("server")?, field("text")))
+                }),
+            },
         })
     }
 
@@ -155,6 +187,67 @@ pub fn label(state: &str) -> &'static str {
         "inactive" => "Inactiva",
         _ => "Desconocido",
     }
+}
+
+/// "claude-opus-4-8[1m]" → "Opus 4.8"; a name with spaces is kept as is.
+pub fn model_label(raw: &str) -> String {
+    let raw = raw.trim();
+    if raw.contains(' ') {
+        return raw.to_string();
+    }
+    let id = raw.split('[').next().unwrap_or(raw);
+    let id = id.strip_prefix("claude-").unwrap_or(id);
+    let mut names = Vec::new();
+    let mut version = Vec::new();
+    for part in id.split('-') {
+        if part.is_empty() || (part.len() >= 8 && part.chars().all(|c| c.is_ascii_digit())) {
+            continue;
+        }
+        if part.chars().all(|c| c.is_ascii_digit()) {
+            version.push(part);
+        } else {
+            let mut c = part.chars();
+            names.push(
+                c.next()
+                    .map_or(String::new(), |f| f.to_uppercase().chain(c).collect()),
+            );
+        }
+    }
+    if names.is_empty() {
+        return raw.to_string();
+    }
+    let name = names.join(" ");
+    if version.is_empty() {
+        name
+    } else {
+        format!("{name} {}", version.join("."))
+    }
+}
+
+/// Spanish name of a permission mode.
+pub fn mode_label(mode: &str) -> String {
+    match mode {
+        "default" => "Pide permiso".into(),
+        "acceptEdits" => "Acepta ediciones".into(),
+        "plan" => "Modo plan".into(),
+        "auto" => "Modo auto".into(),
+        "bypassPermissions" => "Sin pedir permiso".into(),
+        "dontAsk" => "No pregunta".into(),
+        other => other.to_string(),
+    }
+}
+
+/// Spanish name of an effort level.
+pub fn effort_label(effort: &str) -> String {
+    let level = match effort {
+        "low" => "bajo",
+        "medium" => "medio",
+        "high" => "alto",
+        "xhigh" => "muy alto",
+        "max" => "máximo",
+        other => other,
+    };
+    format!("Esfuerzo {level}")
 }
 
 /// Same folder `lulo-hook` writes to (kept in sync with its `status_dir`).
@@ -271,6 +364,43 @@ mod tests {
         assert_eq!(duration(4 * 60 + 5), "4 min");
         assert_eq!(duration(3600 + 12 * 60), "1 h 12");
         assert_eq!(duration(2 * 3600 + 30), "2 h");
+    }
+
+    #[test]
+    fn parses_detail_info() {
+        let s = Session::parse(
+            r#"{"session_id":"a","state":"waiting","title":"Login","model":"claude-opus-4-8",
+                "permission_mode":"auto","effort":"high",
+                "denied":{"tool":"Bash","detail":"rm -rf build","ts":7},
+                "question":{"server":"github","text":"Elige"}}"#,
+        )
+        .unwrap();
+        assert_eq!(s.info.title.as_deref(), Some("Login"));
+        assert_eq!(
+            s.info.denied,
+            Some(("Bash".into(), Some("rm -rf build".into()), 7))
+        );
+        assert_eq!(
+            s.info.question,
+            Some(("github".into(), Some("Elige".into())))
+        );
+        assert_eq!(
+            Session::parse(r#"{"session_id":"a","state":"done"}"#)
+                .unwrap()
+                .info,
+            Info::default()
+        );
+    }
+
+    #[test]
+    fn friendly_names() {
+        assert_eq!(model_label("claude-opus-4-8[1m]"), "Opus 4.8");
+        assert_eq!(model_label("claude-sonnet-4-5-20250929"), "Sonnet 4.5");
+        assert_eq!(model_label("claude-3-5-haiku-20241022"), "Haiku 3.5");
+        assert_eq!(model_label("Opus 4.8"), "Opus 4.8");
+        assert_eq!(model_label("opus"), "Opus");
+        assert_eq!(mode_label("acceptEdits"), "Acepta ediciones");
+        assert_eq!(effort_label("xhigh"), "Esfuerzo muy alto");
     }
 
     #[test]

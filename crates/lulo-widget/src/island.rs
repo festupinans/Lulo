@@ -60,6 +60,7 @@ mod tests {
             since: None,
             started: None,
             claude_pid: None,
+            info: Default::default(),
         }
     }
 

@@ -25,6 +25,8 @@ mod glass;
 mod island;
 mod mood;
 mod octopus;
+mod panel;
+mod procinfo;
 mod sessions;
 mod settings;
 mod style;
@@ -77,6 +79,11 @@ const MOON_EYES_Y: f32 = 35.5;
 const MENU_ROOM: Vec2 = vec2(360.0, 230.0);
 /// How often to check for something full screen.
 const FULLSCREEN_POLL: Duration = Duration::from_secs(2);
+/// Detail panel: minimum width and gap under the chips.
+const PANEL_MIN_W: f32 = 360.0;
+const PANEL_GAP: f32 = 8.0;
+/// How often the open panel refreshes CPU and RAM.
+const PANEL_REFRESH: Duration = Duration::from_secs(2);
 /// Solid backgrounds for the chips.
 const SOLID: Color32 = Color32::from_rgb(23, 23, 30);
 const SOLID_HOVER: Color32 = Color32::from_rgb(40, 40, 52);
@@ -125,8 +132,12 @@ struct App {
     autostart: bool,
     expanded: bool,
     last_inside: Option<Instant>,
-    /// Session whose details are shown; stays while the mouse moves down to them.
+    /// Chip under the mouse, kept while it moves between chips.
     hovered: Option<String>,
+    /// Session whose detail panel is open, chosen by clicking its chip.
+    selected: Option<String>,
+    /// CPU and RAM of the selected session.
+    meter: procinfo::Meter,
     geometry: Option<(Pos2, Vec2)>,
     mood: mood::Mood,
     watch: changes::Watch,
@@ -160,6 +171,8 @@ impl App {
             expanded: false,
             last_inside: None,
             hovered: None,
+            selected: None,
+            meter: procinfo::Meter::default(),
             geometry: None,
             mood: mood::Mood::default(),
             watch: changes::Watch::default(),
@@ -182,6 +195,7 @@ impl App {
             if since >= COLLAPSE_DELAY {
                 self.expanded = false;
                 self.hovered = None;
+                self.selected = None;
             } else {
                 ctx.request_repaint_after(COLLAPSE_DELAY - since);
             }
@@ -368,6 +382,12 @@ impl eframe::App for App {
         {
             self.hovered = None;
         }
+        if !rows
+            .iter()
+            .any(|(s, _)| Some(&s.id) == self.selected.as_ref())
+        {
+            self.selected = None;
+        }
 
         // Out of the way of a video, game or presentation, unless a session
         // needs you. The window stays (a hidden one stops getting frames, and
@@ -442,6 +462,9 @@ impl eframe::App for App {
             size = size.max(MENU_ROOM);
         }
         self.place_window(&ctx, size);
+        if self.selected.is_some() {
+            ctx.request_repaint_after(PANEL_REFRESH);
+        }
         self.schedule_repaint(
             &ctx,
             if open {
@@ -513,13 +536,20 @@ impl App {
         let lines = rows.len().div_ceil(COLUMNS);
         let row_w = cols as f32 * CHIP_W + (cols - 1) as f32 * GAP;
         let row_h = lines as f32 * CHIP_H + lines.saturating_sub(1) as f32 * GAP;
-        let width = row_w.max(moon.x);
+        // The panel drawn this frame is the one chosen before it, so the
+        // layout below never changes halfway through.
+        let shown = self.selected.clone();
+        let panel_w = row_w.max(PANEL_MIN_W);
+        let width = row_w
+            .max(moon.x)
+            .max(if shown.is_some() { panel_w } else { 0.0 });
         let top = origin.y + moon.y + ROW_GAP;
-        let size = vec2(width, top - origin.y + row_h);
+        let mut size = vec2(width, top - origin.y + row_h);
 
         let x = origin.x + (width - row_w) / 2.0;
         let mut hovered = self.hovered.clone();
         let mut forget = None;
+        let mut picked = None;
         for (i, (s, st)) in rows.iter().enumerate() {
             let (col, line) = (i % COLUMNS, i / COLUMNS);
             let chip = Rect::from_min_size(
@@ -529,13 +559,22 @@ impl App {
                 ),
                 vec2(CHIP_W, CHIP_H),
             );
-            // A click brings the session's window to the front. The right
-            // click opens the menu, which also offers to drop inactive ones.
+            // A click opens or closes the session's details; a double click
+            // brings its window to the front (its two clicks toggle the
+            // panel twice, so it stays as it was). The right click opens
+            // the menu, which also offers to drop inactive ones.
             let response = ui.interact(chip, ui.id().with(("chip", &s.id)), Sense::click());
             if response.hovered() {
                 hovered = Some(s.id.clone());
             }
             if response.clicked() {
+                self.selected = if self.selected.as_ref() == Some(&s.id) {
+                    None
+                } else {
+                    Some(s.id.clone())
+                };
+            }
+            if response.double_clicked() {
                 focus::bring_to_front(s.claude_pid);
             }
             response.context_menu(|ui| {
@@ -547,10 +586,24 @@ impl App {
                 }
                 self.menu(ui);
             });
-            let on = hovered.as_deref() == Some(s.id.as_str());
+            let on = hovered.as_deref() == Some(s.id.as_str())
+                || self.selected.as_deref() == Some(s.id.as_str());
             draw_chip(ui.painter(), chip, s, st, on, t, now);
+            if shown.as_deref() == Some(s.id.as_str()) {
+                picked = Some((chip.center().x, *s));
+            }
         }
         self.hovered = hovered;
+        if let Some((notch_x, s)) = picked {
+            let usage = s.claude_pid.and_then(|pid| self.meter.sample(pid));
+            self.meter.retain(|pid| Some(pid) == s.claude_pid);
+            let at = pos2(origin.x + (width - panel_w) / 2.0, top + row_h + PANEL_GAP);
+            let (bottom, go) = panel::draw(ui, at, panel_w, notch_x, s, usage, now);
+            if go {
+                focus::bring_to_front(s.claude_pid);
+            }
+            size.y = bottom - origin.y;
+        }
         if let (Some(id), Some(dir)) = (forget, &self.dir) {
             sessions::forget(dir, &id);
             self.dirty.store(true, Ordering::Relaxed);
@@ -625,19 +678,18 @@ fn draw_chip(painter: &Painter, rect: Rect, s: &Session, state: &str, on: bool, 
     }
     painter.galley(pos2(text_x, y + name_h), label, look.color);
 
+    // Only when Claude keeps a task list: an empty bar looked like nothing
+    // was happening.
+    let (done, total) = s.task_counts();
+    if total == 0 {
+        return;
+    }
     let bar = Rect::from_min_max(
         pos2(inner.left(), inner.bottom() - 4.0),
         pos2(inner.right(), inner.bottom()),
     );
     painter.rect_filled(bar, CornerRadius::same(3), Color32::from_white_alpha(46));
-    let (done, total) = s.task_counts();
-    let progress = if total > 0 {
-        done as f32 / total as f32
-    } else if state == "done" {
-        1.0
-    } else {
-        0.0
-    };
+    let progress = done as f32 / total as f32;
     if progress > 0.0 {
         let mut filled = bar;
         filled.set_width((bar.width() * progress).max(bar.height()));
