@@ -81,7 +81,7 @@ Si instalaste con el zip:
 
 ### Instalación
 
-1. Abre la [última versión](https://github.com/festupinans/Lulo/releases/latest) y descarga `lulo-linux-x64.tar.gz`.
+1. Descarga [`lulo-linux-x64.tar.gz`](https://github.com/festupinans/Lulo/releases/latest/download/lulo-linux-x64.tar.gz) de la última versión.
 2. En una terminal:
 
    ```sh

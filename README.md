@@ -4,7 +4,17 @@
 
 Un pulpo que vive en el borde de arriba de tu pantalla y te avisa qué está haciendo cada sesión de Claude Code: pensando, editando, en el bash, leyendo, con un subagente, esperando permiso o terminada. Es un widget para Windows y Linux, siempre visible, gratis y de código abierto.
 
-**[Descargar para Windows o Linux](https://github.com/festupinans/Lulo/releases/latest)** · [Guía de instalación](INSTALACION.md)
+**Descargar:** [Windows (Lulo-Setup.exe)](https://github.com/festupinans/Lulo/releases/latest/download/Lulo-Setup.exe) · [Linux (lulo-linux-x64.tar.gz)](https://github.com/festupinans/Lulo/releases/latest/download/lulo-linux-x64.tar.gz) · [Guía de instalación](INSTALACION.md)
+
+En Linux:
+
+```sh
+curl -LO https://github.com/festupinans/Lulo/releases/latest/download/lulo-linux-x64.tar.gz
+tar xzf lulo-linux-x64.tar.gz
+./lulo/install.sh
+```
+
+Se instala en `~/.local` sin root y funciona en X11 y en Wayland con XWayland (GNOME, KDE, Hyprland, Sway…). Los detalles están en la [guía](INSTALACION.md#linux).
 
 > Lulo es un proyecto independiente, no afiliado a Anthropic ni respaldado por ella. Claude y Claude Code son marcas de Anthropic.
 
