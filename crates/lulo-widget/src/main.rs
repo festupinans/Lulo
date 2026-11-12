@@ -68,7 +68,8 @@ const MAX_DOTS: usize = 10;
 // Open: the chips hang just under the moon.
 const ROW_GAP: f32 = 2.0;
 const COLUMNS: usize = 4;
-const CHIP_W: f32 = 156.0;
+/// Wider on Linux, whose fonts take more room than Segoe UI.
+const CHIP_W: f32 = if cfg!(windows) { 156.0 } else { 184.0 };
 const CHIP_H: f32 = 50.0;
 const GAP: f32 = 6.0;
 const CHIP_OCTOPUS: f32 = 30.0;
@@ -740,5 +741,7 @@ fn one_line(text: &str, font: FontId, color: Color32, max_width: f32) -> LayoutJ
     job.wrap.max_width = max_width;
     job.wrap.max_rows = 1;
     job.wrap.break_anywhere = true;
+    // A cut name ends in "…" so it reads as cut.
+    job.wrap.overflow_character = Some('…');
     job
 }

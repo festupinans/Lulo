@@ -30,10 +30,9 @@ fn files() -> (Option<PathBuf>, Option<PathBuf>) {
     (at("segoeui.ttf"), at("seguisb.ttf"))
 }
 
-/// Whatever fontconfig picks for sans-serif. Few families ship a semibold,
-/// and fontconfig answers that with the much wider bold, so ask for medium.
-/// It only counts when it is a different file; a variable font would just
-/// repeat the regular.
+/// Whatever fontconfig picks for sans-serif, in its regular weight only:
+/// heavier weights of the usual Linux fonts run too wide for the chips, so
+/// names and states use the regular too.
 #[cfg(target_os = "linux")]
 fn files() -> (Option<PathBuf>, Option<PathBuf>) {
     let find = |pattern: &str| {
@@ -45,9 +44,7 @@ fn files() -> (Option<PathBuf>, Option<PathBuf>) {
                     .is_some_and(|e| e.eq_ignore_ascii_case("ttf") || e.eq_ignore_ascii_case("otf"))
             })
     };
-    let regular = find("sans-serif:weight=regular");
-    let semibold = find("sans-serif:weight=medium").filter(|s| Some(s) != regular.as_ref());
-    (regular, semibold)
+    (find("sans-serif:weight=regular"), None)
 }
 
 #[cfg(not(any(windows, target_os = "linux")))]
