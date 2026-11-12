@@ -1,7 +1,7 @@
 name: Release
 
-# Builds the Windows binaries and the installer, and publishes them as a
-# GitHub release. Runs when a version tag (v0.1.0, ...) is pushed, or by hand
+# Builds the Windows binaries and installer and the Linux package, and
+# publishes them as a GitHub release. Runs when a version tag (v0.1.0, ...) is pushed, or by hand
 # with a tag name. On pull requests that touch the installer it builds and
 # tests everything but publishes nothing.
 #
@@ -24,7 +24,40 @@ permissions:
   contents: write
 
 jobs:
+  linux:
+    # The oldest supported runner, so the binaries run on older glibc too.
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo build --release
+
+      - name: Package
+        run: |
+          mkdir lulo
+          cp target/release/lulo-hook target/release/lulo-widget \
+             installer/linux/install.sh installer/linux/lulo.desktop \
+             assets/lulo.svg INSTALACION.md lulo/
+          tar czf lulo-linux-x64.tar.gz lulo
+
+      - name: Test install and uninstall
+        run: |
+          export PREFIX="$RUNNER_TEMP/prefix" CLAUDE_CONFIG_DIR="$RUNNER_TEMP/claude"
+          sh lulo/install.sh
+          test -x "$PREFIX/bin/lulo-hook" -a -x "$PREFIX/bin/lulo-widget"
+          grep -q lulo-hook "$CLAUDE_CONFIG_DIR/settings.json"
+          sh lulo/install.sh --uninstall
+          if grep -q lulo-hook "$CLAUDE_CONFIG_DIR/settings.json"; then exit 1; fi
+          test ! -e "$PREFIX/bin/lulo-hook"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: lulo-linux-x64
+          path: lulo-linux-x64.tar.gz
+
   windows:
+    needs: linux
     runs-on: windows-latest
     env:
       TAG: ${{ github.event.inputs.tag || github.ref_name }}
@@ -118,6 +151,12 @@ jobs:
             lulo-windows-x64.zip
             installer-screenshots/
 
+      - name: Fetch the Linux package
+        if: github.event_name != 'pull_request'
+        uses: actions/download-artifact@v4
+        with:
+          name: lulo-linux-x64
+
       - name: Publish
         if: github.event_name != 'pull_request'
         shell: bash
@@ -127,3 +166,4 @@ jobs:
           --title "Lulo $TAG"
           --notes-file .github/release-notes.md
           Lulo-Setup.exe lulo-windows-x64.zip lulo-hook.exe lulo-widget.exe
+          lulo-linux-x64.tar.gz

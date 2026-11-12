@@ -1,4 +1,4 @@
-//! Tells you when a session needs you: a Windows notification and Lulo's
+//! Tells you when a session needs you: a system notification and Lulo's
 //! own sound. Both run on a worker thread so the widget never waits on them.
 //!
 //! An app without an MSIX package can't give its toasts a custom sound, so
@@ -40,7 +40,7 @@ impl Alerts {
                             .find(|k| *k != Kind::New || options.new_session_sound);
                         let due = last_sound.is_none_or(|t| t.elapsed() >= SOUND_GAP);
                         if let (Some(kind), true) = (kind, due) {
-                            imp::play(sound(kind));
+                            imp::play(kind);
                             last_sound = Some(Instant::now());
                         }
                     }
@@ -107,7 +107,8 @@ mod imp {
         dnd || crate::display::busy_fullscreen()
     }
 
-    pub fn play(wav: &'static [u8]) {
+    pub fn play(kind: super::Kind) {
+        let wav = super::sound(kind);
         // SND_MEMORY reads the bytes while it plays; they are 'static.
         unsafe {
             PlaySoundW(
@@ -142,13 +143,88 @@ mod imp {
     }
 }
 
-#[cfg(not(windows))]
+/// Linux: `notify-send` for the notification and the first sound player
+/// found (PipeWire, PulseAudio, ALSA) for the sound, which plays a copy of
+/// the WAV kept in Lulo's data folder.
+#[cfg(target_os = "linux")]
+mod imp {
+    use std::process::{Command, Stdio};
+
+    use crate::changes::Kind;
+    use crate::linux;
+
+    const PLAYERS: [&str; 3] = ["pw-play", "paplay", "aplay"];
+
+    pub fn init() {}
+
+    /// Do not disturb in the notification daemon, or something full screen.
+    pub fn quiet() -> bool {
+        let says = |cmd: &str, args: &[&str], busy: &str| {
+            linux::output(cmd, args).is_some_and(|out| out.trim().contains(busy))
+        };
+        says("swaync-client", &["-D"], "true")
+            || says("dunstctl", &["is-paused"], "true")
+            || says("makoctl", &["mode"], "do-not-disturb")
+            || crate::display::busy_fullscreen()
+    }
+
+    pub fn play(kind: Kind) {
+        let name = match kind {
+            Kind::Waiting => "esperando.wav",
+            Kind::Done => "termino.wav",
+            Kind::Error => "error.wav",
+            Kind::New => "nueva.wav",
+        };
+        let path = linux::data_file(&format!("sounds/{name}"), super::sound(kind));
+        let Some(path) = path else {
+            return;
+        };
+        // Its own thread, so a slow player never holds up the next alert.
+        let _ = std::thread::Builder::new()
+            .name("lulo-sound".into())
+            .spawn(move || {
+                for player in PLAYERS {
+                    let played = Command::new(player)
+                        .arg(&path)
+                        .stdin(Stdio::null())
+                        .stdout(Stdio::null())
+                        .stderr(Stdio::null())
+                        .status();
+                    // Only a missing player moves on to the next one.
+                    if played.is_ok() {
+                        return;
+                    }
+                }
+            });
+    }
+
+    pub fn toast(title: &str, body: &str) {
+        let icon = linux::icon();
+        let mut args = vec!["--app-name=Lulo", "--hint=string:desktop-entry:lulo"];
+        let icon_arg = icon.map(|p| format!("--icon={}", p.display()));
+        if let Some(i) = &icon_arg {
+            args.push(i);
+        }
+        let (title, body) = (escape(title), escape(body));
+        args.extend(["--", &title, &body]);
+        linux::run("notify-send", &args);
+    }
+
+    /// Most daemons read the body as markup.
+    fn escape(s: &str) -> String {
+        s.replace('&', "&amp;")
+            .replace('<', "&lt;")
+            .replace('>', "&gt;")
+    }
+}
+
+#[cfg(not(any(windows, target_os = "linux")))]
 mod imp {
     pub fn init() {}
     pub fn quiet() -> bool {
         false
     }
-    pub fn play(_wav: &'static [u8]) {}
+    pub fn play(_kind: crate::changes::Kind) {}
     pub fn toast(_title: &str, _body: &str) {}
 }
 

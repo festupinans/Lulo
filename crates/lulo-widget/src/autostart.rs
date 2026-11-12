@@ -1,5 +1,8 @@
-//! "Iniciar con Windows": a value under HKCU\...\Run, set with `reg.exe` so
-//! the widget needs no registry crate.
+//! Start with the session. On Windows, a value under HKCU\...\Run set with
+//! `reg.exe` so the widget needs no registry crate. On Linux, an XDG
+//! autostart entry in `~/.config/autostart`, which GNOME, KDE, XFCE and
+//! friends run at login (Hyprland and other bare compositors need an
+//! `exec-once` instead; see INSTALACION.md).
 
 #[cfg(windows)]
 mod imp {
@@ -37,7 +40,45 @@ mod imp {
     }
 }
 
-#[cfg(not(windows))]
+#[cfg(target_os = "linux")]
+mod imp {
+    use std::path::PathBuf;
+
+    fn entry() -> Option<PathBuf> {
+        let env = |k: &str| {
+            std::env::var_os(k)
+                .filter(|v| !v.is_empty())
+                .map(PathBuf::from)
+        };
+        let config = env("XDG_CONFIG_HOME").or_else(|| env("HOME").map(|h| h.join(".config")))?;
+        Some(config.join("autostart").join("lulo.desktop"))
+    }
+
+    pub fn is_enabled() -> bool {
+        entry().is_some_and(|p| p.exists())
+    }
+
+    pub fn set(enabled: bool) -> bool {
+        let Some(path) = entry() else {
+            return false;
+        };
+        if !enabled {
+            return std::fs::remove_file(&path).is_ok() || !path.exists();
+        }
+        let Ok(exe) = std::env::current_exe() else {
+            return false;
+        };
+        let text = format!(
+            "[Desktop Entry]\nType=Application\nName=Lulo\nComment=Estado de tus sesiones de Claude Code\nExec=\"{}\"\nIcon=lulo\nTerminal=false\nX-GNOME-Autostart-enabled=true\n",
+            exe.display()
+        );
+        path.parent()
+            .is_some_and(|dir| std::fs::create_dir_all(dir).is_ok())
+            && std::fs::write(&path, text).is_ok()
+    }
+}
+
+#[cfg(not(any(windows, target_os = "linux")))]
 mod imp {
     pub fn is_enabled() -> bool {
         false
@@ -51,4 +92,4 @@ mod imp {
 pub use imp::{is_enabled, set};
 
 /// Whether this platform supports the option at all.
-pub const SUPPORTED: bool = cfg!(windows);
+pub const SUPPORTED: bool = cfg!(any(windows, target_os = "linux"));

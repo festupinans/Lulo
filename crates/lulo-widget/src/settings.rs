@@ -6,7 +6,7 @@ use std::path::PathBuf;
 
 use serde_json::{json, Value};
 
-use crate::display::Anchor;
+use crate::display::{Anchor, Edge};
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct Settings {
@@ -26,8 +26,12 @@ pub struct Settings {
     pub hide_fullscreen: bool,
     /// Monitor, in Lulo's list where the primary is 0. Gone = primary.
     pub monitor: usize,
-    /// Where along the top edge.
+    /// Where along the edge.
     pub anchor: Anchor,
+    /// Top or bottom of the screen.
+    pub edge: Edge,
+    /// Size in percent of the original; 80 is a fifth smaller.
+    pub size: u32,
 }
 
 impl Default for Settings {
@@ -42,6 +46,8 @@ impl Default for Settings {
             hide_fullscreen: true,
             monitor: 0,
             anchor: Anchor::Center,
+            edge: Edge::Top,
+            size: 100,
         }
     }
 }
@@ -53,6 +59,11 @@ impl Settings {
 
     pub fn forget_secs(&self) -> u64 {
         self.forget_hours.max(1) * 3600
+    }
+
+    /// egui's zoom factor for `size`, kept to a sane range.
+    pub fn zoom(&self) -> f32 {
+        self.size.clamp(MIN_SIZE, MAX_SIZE) as f32 / 100.0
     }
 
     pub fn load() -> Settings {
@@ -97,6 +108,13 @@ impl Settings {
             Some("derecha") => Anchor::Right,
             _ => Anchor::Center,
         };
+        s.edge = match v.get("edge").and_then(Value::as_str) {
+            Some("abajo") => Edge::Bottom,
+            _ => Edge::Top,
+        };
+        if let Some(n) = v.get("size").and_then(Value::as_u64) {
+            s.size = (n as u32).clamp(MIN_SIZE, MAX_SIZE);
+        }
         s
     }
 
@@ -120,10 +138,19 @@ impl Settings {
                 Anchor::Center => "centro",
                 Anchor::Right => "derecha",
             },
+            "edge": match self.edge {
+                Edge::Top => "arriba",
+                Edge::Bottom => "abajo",
+            },
+            "size": self.size,
         });
         let _ = fs::write(path, serde_json::to_string_pretty(&v).unwrap_or_default());
     }
 }
+
+/// Limits for `size`, in percent.
+pub const MIN_SIZE: u32 = 50;
+pub const MAX_SIZE: u32 = 200;
 
 fn file() -> Option<PathBuf> {
     Some(dir()?.join("widget.json"))
@@ -163,5 +190,8 @@ mod tests {
         // Zero would hide everything instantly; clamp to one unit.
         let s = Settings::parse(r#"{"inactive_minutes": 0, "forget_hours": 0}"#);
         assert_eq!((s.inactive_secs(), s.forget_secs()), (60, 3600));
+        let s = Settings::parse(r#"{"edge": "abajo", "size": 80}"#);
+        assert_eq!((s.edge, s.size, s.zoom()), (Edge::Bottom, 80, 0.8));
+        assert_eq!(Settings::parse(r#"{"size": 5}"#).size, MIN_SIZE);
     }
 }

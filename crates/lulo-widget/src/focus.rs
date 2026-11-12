@@ -35,7 +35,7 @@ fn window_of_name<W: Copy>(
 }
 
 /// Chooses the window that hosts the session started by `start`.
-#[cfg_attr(not(windows), allow(dead_code))]
+#[cfg_attr(not(any(windows, target_os = "linux")), allow(dead_code))]
 fn pick<W: Copy>(
     start: Option<u32>,
     parents: &HashMap<u32, u32>,
@@ -155,7 +155,113 @@ mod imp {
     }
 }
 
-#[cfg(not(windows))]
+/// Linux: the process tree from `/proc`, and the windows from Hyprland or,
+/// on X11, from `wmctrl`. A terminal emulator owns its window directly, so
+/// the walk up from Claude usually stops at it.
+#[cfg(target_os = "linux")]
+mod imp {
+    use std::collections::HashMap;
+
+    use crate::linux;
+
+    /// Every process's parent and command name.
+    fn processes() -> (HashMap<u32, u32>, HashMap<u32, String>) {
+        let mut parents = HashMap::new();
+        let mut names = HashMap::new();
+        let Ok(dir) = std::fs::read_dir("/proc") else {
+            return (parents, names);
+        };
+        for entry in dir.flatten() {
+            let Some(pid) = entry.file_name().to_str().and_then(|n| n.parse().ok()) else {
+                continue;
+            };
+            let Ok(stat) = std::fs::read_to_string(entry.path().join("stat")) else {
+                continue;
+            };
+            if let Some((name, parent)) = parse_stat(&stat) {
+                parents.insert(pid, parent);
+                names.insert(pid, name.to_string());
+            }
+        }
+        (parents, names)
+    }
+
+    /// `/proc/<pid>/stat` is `pid (comm) state ppid ...`; the name may hold
+    /// spaces and parentheses, so it ends at the last `)`.
+    pub(super) fn parse_stat(stat: &str) -> Option<(&str, u32)> {
+        let open = stat.find('(')?;
+        let close = stat.rfind(')')?;
+        let name = stat.get(open + 1..close)?;
+        let mut rest = stat.get(close + 1..)?.split_whitespace();
+        rest.next()?;
+        Some((name, rest.next()?.parse().ok()?))
+    }
+
+    /// Hyprland: each process's first mapped window, by address.
+    fn hyprland_windows() -> HashMap<u32, u64> {
+        let clients = linux::output("hyprctl", &["clients", "-j"])
+            .and_then(|t| serde_json::from_str::<serde_json::Value>(&t).ok());
+        let mut windows = HashMap::new();
+        for c in clients
+            .as_ref()
+            .and_then(|v| v.as_array())
+            .into_iter()
+            .flatten()
+        {
+            let pid = c["pid"].as_i64().and_then(|p| u32::try_from(p).ok());
+            let address = c["address"]
+                .as_str()
+                .and_then(|a| u64::from_str_radix(a.trim_start_matches("0x"), 16).ok());
+            if let (Some(pid), Some(address), true) = (pid, address, c["mapped"] != false) {
+                windows.entry(pid).or_insert(address);
+            }
+        }
+        windows
+    }
+
+    /// X11: `wmctrl -lp` lines are `0x01e00003  0 4321 host Title`.
+    fn x11_windows() -> HashMap<u32, u64> {
+        let mut windows = HashMap::new();
+        for line in linux::output("wmctrl", &["-lp"])
+            .unwrap_or_default()
+            .lines()
+        {
+            let mut parts = line.split_whitespace();
+            let id = parts
+                .next()
+                .and_then(|id| u64::from_str_radix(id.trim_start_matches("0x"), 16).ok());
+            let pid = parts.nth(1).and_then(|p| p.parse().ok());
+            if let (Some(id), Some(pid)) = (id, pid) {
+                windows.entry(pid).or_insert(id);
+            }
+        }
+        windows
+    }
+
+    fn raise(window: u64) -> bool {
+        if linux::hyprland() {
+            let lua = format!(r#"hl.dsp.focus({{ window = "address:0x{window:x}" }})"#);
+            return linux::run("hyprctl", &["dispatch", &lua])
+                || linux::run(
+                    "hyprctl",
+                    &["dispatch", "focuswindow", &format!("address:0x{window:x}")],
+                );
+        }
+        linux::run("wmctrl", &["-ia", &format!("0x{window:x}")])
+    }
+
+    pub fn bring_to_front(claude_pid: Option<u32>) -> bool {
+        let (parents, names) = processes();
+        let windows = if linux::hyprland() {
+            hyprland_windows()
+        } else {
+            x11_windows()
+        };
+        super::pick(claude_pid, &parents, &names, &windows).is_some_and(raise)
+    }
+}
+
+#[cfg(not(any(windows, target_os = "linux")))]
 mod imp {
     pub fn bring_to_front(_claude_pid: Option<u32>) -> bool {
         false
@@ -234,6 +340,18 @@ mod tests {
         assert_eq!(pick(Some(1), &p, &n, &w), Some(5));
         let (p, n, w) = tree(&[(1, 2, "a.exe", None), (2, 1, "b.exe", None)]);
         assert_eq!(pick(Some(1), &p, &n, &w), None);
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn proc_stat() {
+        let parse = imp::parse_stat;
+        assert_eq!(
+            parse("4321 (claude) S 4300 4321 ..."),
+            Some(("claude", 4300))
+        );
+        assert_eq!(parse("7 (a b) (c)) R 1 7 ..."), Some(("a b) (c)", 1)));
+        assert_eq!(parse("garbage"), None);
     }
 
     #[test]

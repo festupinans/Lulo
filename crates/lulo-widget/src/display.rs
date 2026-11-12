@@ -15,6 +15,13 @@ pub enum Anchor {
     Right,
 }
 
+/// Which screen edge the moon hangs from.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum Edge {
+    Top,
+    Bottom,
+}
+
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Monitor {
     /// Left, top, right, bottom of the whole monitor in physical pixels.
@@ -35,17 +42,18 @@ pub fn pick(monitors: &[Monitor], index: Option<usize>) -> Option<&Monitor> {
         .or_else(|| monitors.first())
 }
 
-/// Top-left of the window in physical pixels for a window `size_px` wide, at
-/// `anchor` on monitor `index` (None or out of range = primary). Left/Right
-/// keep a margin of 24 logical px from the edge.
+/// Top-left of the window in physical pixels for a window `size_px` big, at
+/// `anchor` along `edge` of monitor `index` (None or out of range =
+/// primary). Left/Right keep a margin of 24 logical px from the side.
 pub fn place(
     monitors: &[Monitor],
     index: Option<usize>,
     anchor: Anchor,
+    edge: Edge,
     size_px: (f32, f32),
 ) -> Option<(f32, f32)> {
     let m = pick(monitors, index)?;
-    let (left, top, right, _) = m.rect_px;
+    let (left, top, right, bottom) = m.rect_px;
     let (left, right) = (left as f32, right as f32);
     let margin = MARGIN * m.scale;
     let x = match anchor {
@@ -53,7 +61,11 @@ pub fn place(
         Anchor::Center => left + (right - left - size_px.0) / 2.0,
         Anchor::Right => right - margin - size_px.0,
     };
-    Some((x.max(left).round(), top as f32))
+    let y = match edge {
+        Edge::Top => top as f32,
+        Edge::Bottom => (bottom as f32 - size_px.1).round(),
+    };
+    Some((x.max(left).round(), y))
 }
 
 /// Every monitor, primary first.
@@ -107,9 +119,71 @@ pub fn monitors() -> Vec<Monitor> {
     list
 }
 
-#[cfg(not(windows))]
+/// Every monitor as X11 sees it (also under XWayland), primary first.
+///
+/// X11 has one scale for the whole screen, so `scale` stays 1.0 and the
+/// caller uses egui's own. The list is cached for a few seconds: the widget
+/// asks again on every session change and `xrandr` is a process launch.
+#[cfg(target_os = "linux")]
+pub fn monitors() -> Vec<Monitor> {
+    use std::sync::Mutex;
+    use std::time::{Duration, Instant};
+
+    const FRESH: Duration = Duration::from_secs(10);
+    static CACHE: Mutex<Option<(Instant, Vec<Monitor>)>> = Mutex::new(None);
+
+    let Ok(mut cache) = CACHE.lock() else {
+        return Vec::new();
+    };
+    if let Some((at, list)) = cache.as_ref() {
+        if at.elapsed() < FRESH {
+            return list.clone();
+        }
+    }
+    let list = crate::linux::output("xrandr", &["--listmonitors"])
+        .map(|text| parse_xrandr(&text))
+        .unwrap_or_default();
+    *cache = Some((Instant::now(), list.clone()));
+    list
+}
+
+#[cfg(not(any(windows, target_os = "linux")))]
 pub fn monitors() -> Vec<Monitor> {
     Vec::new()
+}
+
+/// Reads `xrandr --listmonitors`: one ` 0: +*DP-1 2560/597x1440/336+0+0  DP-1`
+/// line per monitor, `*` marking the primary. XWayland marks none, so the
+/// first one counts as primary then.
+#[cfg_attr(not(target_os = "linux"), allow(dead_code))]
+fn parse_xrandr(text: &str) -> Vec<Monitor> {
+    let mut list: Vec<Monitor> = text
+        .lines()
+        .filter_map(|line| {
+            let mut parts = line.split_whitespace();
+            parts.next()?.strip_suffix(':')?;
+            let name = parts.next()?;
+            let geometry = parts.next()?;
+            // 2560/597x1440/336+0+0: size/mm x size/mm +x +y.
+            let (size, pos) = geometry.split_once('+')?;
+            let (x, y) = pos.split_once('+')?;
+            let (w, h) = size.split_once('x')?;
+            let num = |s: &str| s.split('/').next()?.parse::<i32>().ok();
+            let (w, h, x, y) = (num(w)?, num(h)?, num(x)?, num(y)?);
+            Some(Monitor {
+                rect_px: (x, y, x + w, y + h),
+                scale: 1.0,
+                primary: name.contains('*'),
+            })
+        })
+        .collect();
+    if !list.iter().any(|m| m.primary) {
+        if let Some(first) = list.first_mut() {
+            first.primary = true;
+        }
+    }
+    list.sort_by_key(|m| !m.primary);
+    list
 }
 
 /// Whether something full-screen or a presentation has the screen (a video,
@@ -122,7 +196,23 @@ pub fn busy_fullscreen() -> bool {
     unsafe { SHQueryUserNotificationState(&mut state) >= 0 && is_busy(state) }
 }
 
-#[cfg(not(windows))]
+/// On Hyprland: whether the focused window is full screen. Other Linux
+/// desktops don't say, so the widget never hides there.
+#[cfg(target_os = "linux")]
+pub fn busy_fullscreen() -> bool {
+    if !crate::linux::hyprland() {
+        return false;
+    }
+    crate::linux::output("hyprctl", &["activewindow", "-j"])
+        .and_then(|text| serde_json::from_str::<serde_json::Value>(&text).ok())
+        .is_some_and(|w| match &w["fullscreen"] {
+            // 0 = no, 1 = maximized, 2 = full screen; older versions say true/false.
+            serde_json::Value::Bool(b) => *b,
+            v => v.as_u64() == Some(2),
+        })
+}
+
+#[cfg(not(any(windows, target_os = "linux")))]
 pub fn busy_fullscreen() -> bool {
     false
 }
@@ -157,15 +247,24 @@ mod tests {
 
     #[test]
     fn no_monitors() {
-        assert_eq!(place(&[], None, Anchor::Center, (100.0, 50.0)), None);
+        assert_eq!(
+            place(&[], None, Anchor::Center, Edge::Top, (100.0, 50.0)),
+            None
+        );
     }
 
     #[test]
     fn primary_by_default_and_out_of_range() {
         let ms = setup();
         let primary = Some((910.0, 0.0));
-        assert_eq!(place(&ms, None, Anchor::Center, (100.0, 50.0)), primary);
-        assert_eq!(place(&ms, Some(7), Anchor::Center, (100.0, 50.0)), primary);
+        assert_eq!(
+            place(&ms, None, Anchor::Center, Edge::Top, (100.0, 50.0)),
+            primary
+        );
+        assert_eq!(
+            place(&ms, Some(7), Anchor::Center, Edge::Top, (100.0, 50.0)),
+            primary
+        );
     }
 
     #[test]
@@ -175,7 +274,7 @@ mod tests {
             monitor((0, 0, 1920, 1080), 1.0, true),
         ];
         assert_eq!(
-            place(&ms, None, Anchor::Left, (100.0, 50.0)),
+            place(&ms, None, Anchor::Left, Edge::Top, (100.0, 50.0)),
             Some((24.0, 0.0))
         );
     }
@@ -183,7 +282,7 @@ mod tests {
     #[test]
     fn anchors() {
         let ms = setup();
-        let at = |a| place(&ms, Some(0), a, (100.0, 50.0));
+        let at = |a| place(&ms, Some(0), a, Edge::Top, (100.0, 50.0));
         assert_eq!(at(Anchor::Left), Some((24.0, 0.0)));
         assert_eq!(at(Anchor::Center), Some((910.0, 0.0)));
         assert_eq!(at(Anchor::Right), Some((1796.0, 0.0)));
@@ -192,7 +291,7 @@ mod tests {
     #[test]
     fn monitor_left_of_primary() {
         let ms = setup();
-        let at = |a| place(&ms, Some(1), a, (300.0, 75.0));
+        let at = |a| place(&ms, Some(1), a, Edge::Top, (300.0, 75.0));
         assert_eq!(at(Anchor::Left), Some((-2844.0, 0.0)));
         assert_eq!(at(Anchor::Center), Some((-1590.0, 0.0)));
         assert_eq!(at(Anchor::Right), Some((-336.0, 0.0)));
@@ -202,9 +301,43 @@ mod tests {
     fn wider_than_monitor_keeps_left_edge() {
         let ms = setup();
         assert_eq!(
-            place(&ms, Some(0), Anchor::Center, (3000.0, 50.0)),
+            place(&ms, Some(0), Anchor::Center, Edge::Top, (3000.0, 50.0)),
             Some((0.0, 0.0))
         );
+    }
+
+    #[test]
+    fn bottom_edge() {
+        let ms = setup();
+        assert_eq!(
+            place(&ms, Some(0), Anchor::Center, Edge::Bottom, (100.0, 50.0)),
+            Some((910.0, 1030.0))
+        );
+        assert_eq!(
+            place(&ms, Some(1), Anchor::Left, Edge::Bottom, (300.0, 75.0)),
+            Some((-2844.0, 1725.0))
+        );
+    }
+
+    #[test]
+    fn xrandr_monitors() {
+        let text = "Monitors: 2\n \
+            0: +eDP-1 2560/340x1600/220+0+0  eDP-1\n \
+            1: +*DP-2 1920/527x1080/296+2560+0  DP-2\n";
+        assert_eq!(
+            parse_xrandr(text),
+            [
+                monitor((2560, 0, 4480, 1080), 1.0, true),
+                monitor((0, 0, 2560, 1600), 1.0, false),
+            ]
+        );
+        // XWayland marks no primary: the first one is.
+        let xwayland = "Monitors: 1\n 0: +eDP-1 2560/340x1600/220+0+0  eDP-1\n";
+        assert_eq!(
+            parse_xrandr(xwayland),
+            [monitor((0, 0, 2560, 1600), 1.0, true)]
+        );
+        assert_eq!(parse_xrandr("garbage"), []);
     }
 
     #[test]

@@ -1,0 +1,10 @@
+[Desktop Entry]
+Type=Application
+Name=Lulo
+GenericName=Estado de Claude Code
+Comment=Un pulpo que te avisa qué hace cada sesión de Claude Code
+Exec=lulo-widget
+Icon=lulo
+Terminal=false
+Categories=Utility;Development;
+StartupWMClass=lulo

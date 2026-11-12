@@ -32,3 +32,14 @@ jobs:
           path: |
             target/release/lulo-hook.exe
             target/release/lulo-widget.exe
+      - name: Build Linux binaries
+        if: runner.os == 'Linux'
+        run: cargo build --release
+      - name: Upload Linux binaries
+        if: runner.os == 'Linux'
+        uses: actions/upload-artifact@v4
+        with:
+          name: lulo-linux-x64
+          path: |
+            target/release/lulo-hook
+            target/release/lulo-widget

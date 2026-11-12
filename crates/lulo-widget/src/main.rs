@@ -19,10 +19,13 @@ mod autostart;
 mod changes;
 mod cursor;
 mod display;
+mod flip;
 mod focus;
 mod fonts;
 mod glass;
 mod island;
+#[cfg(target_os = "linux")]
+mod linux;
 mod mood;
 mod octopus;
 mod sessions;
@@ -40,7 +43,7 @@ use eframe::egui::{
 };
 use notify::{RecursiveMode, Watcher};
 
-use display::Anchor;
+use display::{Anchor, Edge};
 use octopus::Act;
 use sessions::Session;
 use settings::Settings;
@@ -80,15 +83,31 @@ const FULLSCREEN_POLL: Duration = Duration::from_secs(2);
 /// Solid backgrounds for the chips.
 const SOLID: Color32 = Color32::from_rgb(23, 23, 30);
 const SOLID_HOVER: Color32 = Color32::from_rgb(40, 40, 52);
+/// Right-click menu entries that name the system.
+#[cfg(windows)]
+const AUTOSTART_LABEL: &str = "Iniciar con Windows";
+#[cfg(not(windows))]
+const AUTOSTART_LABEL: &str = "Iniciar con la sesión";
+#[cfg(windows)]
+const NOTIFICATIONS_LABEL: &str = "Avisos de Windows";
+#[cfg(not(windows))]
+const NOTIFICATIONS_LABEL: &str = "Notificaciones";
 /// The time next to the state on a chip.
 const MUTED: Color32 = Color32::from_rgb(154, 154, 174);
 
 fn main() -> eframe::Result {
+    #[cfg(target_os = "linux")]
+    {
+        linux::prefer_x11();
+        linux::hyprland_rules();
+    }
     let settings = Settings::load();
     // Writes the defaults on first run so the settings are there to edit.
     settings.save();
     let viewport = egui::ViewportBuilder::default()
         .with_title("Lulo")
+        // The class Linux window rules match.
+        .with_app_id("lulo")
         .with_inner_size([MOON_W, 60.0])
         .with_decorations(false)
         .with_transparent(true)
@@ -147,6 +166,9 @@ impl App {
             .and_then(|d| watch(d, &dirty, cc.egui_ctx.clone()));
         fonts::install(&cc.egui_ctx);
         cc.egui_ctx.set_visuals(egui::Visuals::dark());
+        // Only the "size" setting zooms, never Ctrl + / Ctrl -.
+        cc.egui_ctx.options_mut(|o| o.zoom_with_keyboard = false);
+        cc.egui_ctx.set_zoom_factor(settings.zoom());
         glass::apply(cc);
         alert::register();
         App {
@@ -195,21 +217,34 @@ impl App {
         let s = &self.settings;
         let pos = match display::pick(&self.monitors, Some(s.monitor)) {
             Some(m) => {
-                let size_px = (size.x * m.scale, size.y * m.scale);
-                let (x, y) = display::place(&self.monitors, Some(s.monitor), s.anchor, size_px)
-                    .unwrap_or_default();
+                // X11 has one scale for every monitor: egui's own, which
+                // already holds the zoom.
+                let scale = if cfg!(windows) {
+                    m.scale * ctx.zoom_factor()
+                } else {
+                    ctx.pixels_per_point()
+                };
+                let size_px = (size.x * scale, size.y * scale);
+                let (x, y) =
+                    display::place(&self.monitors, Some(s.monitor), s.anchor, s.edge, size_px)
+                        .unwrap_or_default();
                 // egui turns points into pixels with the scale of the
                 // monitor the window is on now; once it lands on another,
                 // the next frame places it again with that one's scale.
                 let ppp = ctx.pixels_per_point();
                 pos2(x / ppp, y / ppp).round()
             }
-            // No monitor list off Windows: center on the current screen.
+            // No monitor list (native Wayland, no xrandr): center on the
+            // current screen.
             None => {
                 let screen = ctx
                     .input(|i| i.viewport().monitor_size)
                     .unwrap_or(vec2(1920.0, 1080.0));
-                pos2(((screen.x - size.x) / 2.0).max(0.0), 0.0).round()
+                let y = match s.edge {
+                    Edge::Top => 0.0,
+                    Edge::Bottom => (screen.y - size.y).max(0.0),
+                };
+                pos2(((screen.x - size.x) / 2.0).max(0.0), y).round()
             }
         };
         if self.geometry != Some((pos, size)) {
@@ -239,17 +274,13 @@ impl App {
 
     /// The right-click menu: autostart, alerts and close.
     fn menu(&mut self, ui: &mut egui::Ui) {
-        if autostart::SUPPORTED
-            && ui
-                .checkbox(&mut self.autostart, "Iniciar con Windows")
-                .changed()
-        {
+        if autostart::SUPPORTED && ui.checkbox(&mut self.autostart, AUTOSTART_LABEL).changed() {
             autostart::set(self.autostart);
             self.autostart = autostart::is_enabled();
         }
         let s = &mut self.settings;
         let mut changed = ui
-            .checkbox(&mut s.notifications, "Avisos de Windows")
+            .checkbox(&mut s.notifications, NOTIFICATIONS_LABEL)
             .changed();
         changed |= ui.checkbox(&mut s.sounds, "Sonidos").changed();
         changed |= ui
@@ -274,6 +305,20 @@ impl App {
                 (Anchor::Right, "Derecha"),
             ] {
                 changed |= ui.radio_value(&mut s.anchor, anchor, name).changed();
+            }
+            ui.separator();
+            for (edge, name) in [(Edge::Top, "Arriba"), (Edge::Bottom, "Abajo")] {
+                changed |= ui.radio_value(&mut s.edge, edge, name).changed();
+            }
+        });
+        ui.menu_button("Tamaño", |ui| {
+            for (size, name) in [(80, "Pequeño"), (100, "Normal"), (120, "Grande")] {
+                if ui.radio_value(&mut s.size, size, name).changed() {
+                    changed = true;
+                    ui.ctx().set_zoom_factor(s.zoom());
+                    // The same points now take other pixels: place again.
+                    self.geometry = None;
+                }
             }
         });
         if changed {
@@ -398,45 +443,79 @@ impl eframe::App for App {
             .collect();
         let open = self.expanded && !rows.is_empty();
         let moon = moon_size(active.len());
-        let mut size = moon;
+        // On the bottom edge everything is laid out from the window's bottom
+        // and the moon is drawn as for the top, then mirrored.
+        let bottom = self.settings.edge == Edge::Bottom;
 
         // Short reactions of the octopus on top of its state.
         let act = if self.settings.animate {
             let now = ctx.input(|i| i.time);
             self.mood
                 .observe(rows.iter().map(|(s, st)| (s.id.as_str(), *st)), state, now);
-            let eyes = pos2(moon.x / 2.0, MOON_EYES_Y * moon.x / octopus::MOON_SIZE.x);
+            let eyes_y = MOON_EYES_Y * moon.x / octopus::MOON_SIZE.x;
+            let eyes = if bottom {
+                pos2(moon.x / 2.0, full.height() - eyes_y)
+            } else {
+                pos2(moon.x / 2.0, eyes_y)
+            };
             let look = if open { None } else { nearby_mouse(&ctx, eyes) };
+            // The mirrored octopus looks the mirrored way.
+            let look = look.map(|v| if bottom { vec2(v.x, -v.y) } else { v });
             self.mood.act(state, now, !open, look)
         } else {
             Act::None
         };
 
-        if open {
-            size = self.draw_open(ui, full.min, moon, &rows, t, now);
+        // The yo-yo hangs past the moon's usual canvas.
+        let canvas_h = moon.y * act.canvas_height() / octopus::MOON_SIZE.y;
+        let mut size = if open {
+            open_size(rows.len(), moon)
         } else {
-            // The yo-yo hangs below the moon's usual canvas.
-            size.y = moon.y * act.canvas_height() / octopus::MOON_SIZE.y;
+            vec2(moon.x, canvas_h)
+        };
+        let top = if bottom {
+            full.max.y - size.y
+        } else {
+            full.min.y
+        };
+        if open {
+            self.draw_open(ui, pos2(full.min.x, top), moon, &rows, t, now, bottom);
         }
+        // Where the moon is drawn before mirroring, and the band it mirrors in.
+        let (moon_top, band) = match (bottom, open) {
+            (false, _) => (top, moon.y),
+            (true, true) => (top + size.y - moon.y, moon.y),
+            (true, false) => (top, canvas_h),
+        };
         // Clicks on the moon count toward annoying the octopus.
+        let moon_y = if bottom {
+            moon_top + band - moon.y
+        } else {
+            moon_top
+        };
         let moon_rect =
-            Rect::from_min_size(pos2(full.min.x + (size.x - moon.x) / 2.0, full.min.y), moon);
+            Rect::from_min_size(pos2(full.min.x + (size.x - moon.x) / 2.0, moon_y), moon);
         let poke = ui.interact(moon_rect, ui.id().with("moon"), Sense::click());
         if poke.clicked() {
             self.mood.click(ctx.input(|i| i.time));
         }
         poke.context_menu(|ui| self.menu(ui));
         // Last, so the moon and the peeking head sit over everything else.
+        let painter = ui.painter();
+        let first = ctx.graphics_mut(|g| g.entry(painter.layer_id()).next_idx());
         draw_moon(
-            ui.painter(),
+            painter,
             full.min.x + size.x / 2.0,
-            full.min.y,
+            moon_top,
             moon,
             &active,
             state,
             t,
             act,
         );
+        if bottom {
+            flip::since(&ctx, painter.layer_id(), first, moon_top + band / 2.0);
+        }
         // Room for the right-click menu, which draws inside the window.
         if egui::Popup::is_any_open(&ctx) {
             size = size.max(MENU_ROOM);
@@ -463,6 +542,15 @@ fn nearby_mouse(ctx: &egui::Context, eyes: Pos2) -> Option<Vec2> {
     let d = pos2(x / ppp, y / ppp) - (outer?.min + eyes.to_vec2());
     let dist = d.length();
     (dist > 1.0 && dist < NEAR_MOUSE).then(|| d / dist)
+}
+
+/// Size of the open widget: the moon plus the rows of chips.
+fn open_size(sessions: usize, moon: Vec2) -> Vec2 {
+    let cols = sessions.clamp(1, COLUMNS);
+    let lines = sessions.div_ceil(COLUMNS);
+    let row_w = cols as f32 * CHIP_W + (cols - 1) as f32 * GAP;
+    let row_h = lines as f32 * CHIP_H + lines.saturating_sub(1) as f32 * GAP;
+    vec2(row_w.max(moon.x), moon.y + ROW_GAP + row_h)
 }
 
 /// Size of the half moon: wider only when many dots need room.
@@ -497,9 +585,10 @@ fn draw_moon(
 }
 
 impl App {
-    /// The open widget under the half moon: one chip per session, with
-    /// nothing behind them. Returns the size of everything together, moon
-    /// included.
+    /// The open widget beside the half moon (under it, or over it on the
+    /// bottom edge): one chip per session, with nothing behind them.
+    /// `origin` is the top left of everything together, moon included.
+    #[allow(clippy::too_many_arguments)]
     fn draw_open(
         &mut self,
         ui: &mut egui::Ui,
@@ -508,14 +597,16 @@ impl App {
         rows: &[(&Session, &str)],
         t: f64,
         now: u64,
-    ) -> Vec2 {
+        bottom: bool,
+    ) {
         let cols = rows.len().clamp(1, COLUMNS);
-        let lines = rows.len().div_ceil(COLUMNS);
         let row_w = cols as f32 * CHIP_W + (cols - 1) as f32 * GAP;
-        let row_h = lines as f32 * CHIP_H + lines.saturating_sub(1) as f32 * GAP;
-        let width = row_w.max(moon.x);
-        let top = origin.y + moon.y + ROW_GAP;
-        let size = vec2(width, top - origin.y + row_h);
+        let width = open_size(rows.len(), moon).x;
+        let top = if bottom {
+            origin.y
+        } else {
+            origin.y + moon.y + ROW_GAP
+        };
 
         let x = origin.x + (width - row_w) / 2.0;
         let mut hovered = self.hovered.clone();
@@ -556,7 +647,6 @@ impl App {
             self.dirty.store(true, Ordering::Relaxed);
             ui.ctx().request_repaint();
         }
-        size
     }
 }
 

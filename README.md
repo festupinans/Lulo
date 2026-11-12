@@ -2,13 +2,13 @@
 
 ![Lulo el Pulpo: te aviso qué hace cada sesión de Claude Code](docs/img/portada.png)
 
-Un pulpo que vive en el borde de arriba de tu pantalla y te avisa qué está haciendo cada sesión de Claude Code: pensando, editando, en el bash, leyendo, con un subagente, esperando permiso o terminada. Es un widget para Windows, siempre visible, gratis y de código abierto.
+Un pulpo que vive en el borde de arriba de tu pantalla y te avisa qué está haciendo cada sesión de Claude Code: pensando, editando, en el bash, leyendo, con un subagente, esperando permiso o terminada. Es un widget para Windows y Linux, siempre visible, gratis y de código abierto.
 
-**[Descargar Lulo-Setup.exe](https://github.com/festupinans/Lulo/releases/latest)** · [Guía de instalación](INSTALACION.md)
+**[Descargar para Windows o Linux](https://github.com/festupinans/Lulo/releases/latest)** · [Guía de instalación](INSTALACION.md)
 
 > Lulo es un proyecto independiente, no afiliado a Anthropic ni respaldado por ella. Claude y Claude Code son marcas de Anthropic.
 
-El instalador no está firmado, así que Windows puede mostrar el aviso de SmartScreen la primera vez. Todo el código está en este repositorio para que puedas revisarlo o compilarlo tú mismo.
+El instalador de Windows no está firmado, así que Windows puede mostrar el aviso de SmartScreen la primera vez. Todo el código está en este repositorio para que puedas revisarlo o compilarlo tú mismo.
 
 <p align="center">
   <img src="docs/img/estados.gif" width="480" alt="La media luna de Lulo con una ficha que cambia de estado: pensando, editando, bash, leyendo, subagente, esperando, terminó y error">
@@ -59,7 +59,7 @@ Si todo lleva 2 minutos terminado, se aburre y juega con un yoyó. En Windows ta
 
 ## Sonidos
 
-Cuando una sesión cambia a un estado que importa, sale una notificación de Windows y suena un sonido corto. Todos están sintetizados con código en [`assets/sounds/synth.py`](assets/sounds/synth.py), sin grabaciones de terceros.
+Cuando una sesión cambia a un estado que importa, sale una notificación del sistema y suena un sonido corto. Todos están sintetizados con código en [`assets/sounds/synth.py`](assets/sounds/synth.py), sin grabaciones de terceros.
 
 | Cuándo suena | Sonido | Escuchar |
 |---|---|---|
@@ -108,22 +108,23 @@ Haz doble clic en `lulo-widget.exe`. Aparece como una media luna oscura pegada a
 - **Reacciones:** plegado, el pulpo sigue el ratón con la mirada cuando pasa cerca, guiña un ojo de vez en cuando mientras trabaja, celebra con papelitos cuando una sesión termina y se sobresalta cuando una empieza a esperarte. Si todo terminó hace 2 minutos se aburre y juega con un yo-yo. Con 3 clics seguidos sobre él se enoja, y con 5 se esconde en la luna y luego asoma un ojo. Nada de esto tapa un aviso de espera o de error.
 - **Al pasar el ratón:** debajo de la luna aparece una ficha por sesión (pulpo, proyecto, estado, tiempo en ese estado y barra de tareas hechas), sin marco ni fondo. Se vuelve a plegar al sacar el ratón. El tiempo cuenta desde que enviaste el pedido mientras Claude trabaja, y desde el cambio de estado cuando espera, termina o falla.
 - **Clic en una ficha:** trae al frente la ventana de esa sesión: la terminal donde corre o la app de escritorio de Claude. Dentro de la app no elige la sesión exacta.
-- **Avisos y sonidos:** cuando una sesión pasa a "Esperando", termina o da error, sale una notificación de Windows y suena Burbujas, Plop o Glub. Con No molestar activo, o con algo en pantalla completa, no suena. Nunca suena más de una vez cada 2 s.
+- **Avisos y sonidos:** cuando una sesión pasa a "Esperando", termina o da error, sale una notificación del sistema y suena Burbujas, Plop o Glub. Con No molestar activo, o con algo en pantalla completa, no suena. Nunca suena más de una vez cada 2 s.
 - **Pantalla completa:** con un video, un juego o una presentación en pantalla completa la luna se esconde, y vuelve sola si una sesión espera o falla.
 - **El pulpo de cada ficha:** hace la escena de ese estado. Piensa, teclea frente al PC, mira la terminal, busca con lupa, llama a pulpitos ayudantes, espera impaciente, salta al terminar, tiembla con un error y duerme si no hay actividad.
 - **Segundo plano:** Lulo cuenta los comandos, monitores (`Monitor`) y subagentes que Claude deja corriendo en segundo plano, también los comandos que Claude Code manda al fondo por sí solo. Mientras Claude sigue trabajando, la ficha lo indica junto al estado con un punto violeta que late y la cantidad («+1»). Si Claude termina su turno con alguno vivo, la sesión sale «En segundo plano» en vez de «Terminó». Cada tarea sale de la cuenta cuando Claude Code avisa que acabó (`<task-notification>`) o cuando Claude la detiene con `TaskStop`.
-- **Menú (clic derecho):** "Iniciar con Windows", "Avisos de Windows", "Sonidos", "Esconder en pantalla completa", "Pantalla" (con más de un monitor), "Posición" (izquierda, centro o derecha del borde de arriba) y "Cerrar Lulo". Sobre una sesión inactiva, también "Quitar de la lista".
+- **Menú (clic derecho):** "Iniciar con Windows", "Avisos de Windows", "Sonidos", "Esconder en pantalla completa", "Pantalla" (con más de un monitor), "Posición" (izquierda, centro o derecha, en el borde de arriba o el de abajo), "Tamaño" (pequeño 80 %, normal o grande 120 %) y "Cerrar Lulo". En el borde de abajo la luna se vuelve una cúpula, el pulpo asoma hacia arriba y las fichas salen encima. Sobre una sesión inactiva, también "Quitar de la lista".
 - **Inactiva:** una sesión sin eventos durante 5 minutos pasa a "Inactiva" y baja al final. "Esperando" nunca pasa a inactiva, porque necesita que respondas.
 - **Sesiones huérfanas:** si cierras una terminal sin `/exit`, Claude Code no envía `SessionEnd`. El widget borra esos archivos tras 12 horas sin eventos.
 - **Consumo:** el pulpo se anima a 12 cuadros por segundo plegado y a 30 desplegado. Con `"animate": false` queda quieto y el widget solo se redibuja cuando cambia un archivo de estado o el ratón está encima, más un refresco cada 15 s para los tiempos.
 
-La configuración está en `%LOCALAPPDATA%\Lulo\widget.json`:
+La configuración está en `%LOCALAPPDATA%\Lulo\widget.json` (en Linux, `~/.local/share/lulo/widget.json`):
 
 ```json
 {
   "animate": true, "inactive_minutes": 5, "forget_hours": 12,
   "notifications": true, "sounds": true, "new_session_sound": false,
-  "hide_fullscreen": true, "monitor": 0, "anchor": "centro"
+  "hide_fullscreen": true, "monitor": 0, "anchor": "centro",
+  "edge": "arriba", "size": 100
 }
 ```
 
@@ -178,6 +179,15 @@ cargo clippy --all-targets -- -D warnings
 ```
 
 `LULO_STATUS_DIR` cambia la carpeta de estado (útil en pruebas). Fuera de Windows se usa `~/.local/state/claude-status`.
+
+### Linux
+
+Compila igual con `cargo build --release`. Lo propio de Linux vive en `crates/lulo-widget/src/linux.rs`:
+
+- Wayland no deja que una app ponga su ventana donde quiera ni la deje siempre encima, así que el widget corre por XWayland. Con `LULO_WAYLAND=1` se queda en Wayland nativo y la posición depende de las reglas del compositor.
+- En Hyprland añade solo sus reglas de ventana a la sesión (flotante, fijada en todos los escritorios, sin borde, sombra ni desenfoque). La clase de la ventana es `lulo`.
+- Usa herramientas estándar en vez de enlazar librerías: `xrandr` para los monitores, `notify-send` para los avisos, `pw-play`, `paplay` o `aplay` para los sonidos, `fc-match` para la fuente, y `hyprctl` o `wmctrl` para el clic en una ficha y la pantalla completa. Si falta alguna, solo se pierde esa función.
+- Los ojos no siguen el ratón fuera de la ventana: X11 bajo Wayland no lo informa.
 
 ## Licencia
 

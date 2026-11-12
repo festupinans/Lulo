@@ -1,5 +1,6 @@
 //! `lulo-hook`: runs on every Claude Code hook event and records the
-//! session's current state in `%LOCALAPPDATA%\claude-status\<session_id>.json`.
+//! session's current state in `%LOCALAPPDATA%\claude-status\<session_id>.json`
+//! (`~/.local/state/claude-status` on Linux).
 //!
 //! It runs on every tool call, so hook mode does the minimum: read stdin,
 //! write one small file, exit 0. It never prints to stdout (Claude Code would
@@ -102,7 +103,8 @@ fn run_hook() {
 fn double_click_setup() -> Result<(), String> {
     println!("Lulo: instalando el hook de estado para Claude Code...\n");
     let current = std::env::current_exe().map_err(|e| e.to_string())?;
-    let dir = install::default_install_dir().ok_or("no se encontró la carpeta %LOCALAPPDATA%")?;
+    let dir =
+        install::default_install_dir().ok_or("no se encontró la carpeta de instalación de Lulo")?;
     let target = dir.join(current.file_name().ok_or("nombre de archivo inválido")?);
     if !same_file(&current, &target) {
         std::fs::create_dir_all(&dir).map_err(|e| format!("{}: {e}", dir.display()))?;
@@ -134,7 +136,12 @@ fn double_click_setup() -> Result<(), String> {
     if widget.exists() {
         println!("Widget:                   {}", widget.display());
         if std::process::Command::new(&widget).spawn().is_ok() {
-            println!("\nWidget abierto. Clic derecho sobre él para \"Iniciar con Windows\".");
+            let autostart = if cfg!(windows) {
+                "Iniciar con Windows"
+            } else {
+                "Iniciar con la sesión"
+            };
+            println!("\nWidget abierto. Clic derecho sobre él para \"{autostart}\".");
         }
     }
 
