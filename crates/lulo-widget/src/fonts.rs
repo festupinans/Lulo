@@ -10,8 +10,16 @@ use eframe::egui::{self, FontData, FontDefinitions, FontFamily, FontId};
 
 const SEMIBOLD: &str = "semibold";
 
+/// Linux sans fonts (Noto, DejaVu...) run wider than Segoe UI, which the
+/// chip layout was made for; a smaller size keeps names from being cut.
+const TEXT_SCALE: f32 = if cfg!(windows) { 1.0 } else { 0.88 };
+
+pub fn regular(size: f32) -> FontId {
+    FontId::proportional(size * TEXT_SCALE)
+}
+
 pub fn semibold(size: f32) -> FontId {
-    FontId::new(size, FontFamily::Name(SEMIBOLD.into()))
+    FontId::new(size * TEXT_SCALE, FontFamily::Name(SEMIBOLD.into()))
 }
 
 /// The regular and semibold font files to use, when there are any.
@@ -22,8 +30,10 @@ fn files() -> (Option<PathBuf>, Option<PathBuf>) {
     (at("segoeui.ttf"), at("seguisb.ttf"))
 }
 
-/// Whatever fontconfig picks for sans-serif. The semibold only counts when
-/// it is a different file; a variable font would just repeat the regular.
+/// Whatever fontconfig picks for sans-serif. Few families ship a semibold,
+/// and fontconfig answers that with the much wider bold, so ask for medium.
+/// It only counts when it is a different file; a variable font would just
+/// repeat the regular.
 #[cfg(target_os = "linux")]
 fn files() -> (Option<PathBuf>, Option<PathBuf>) {
     let find = |pattern: &str| {
@@ -36,7 +46,7 @@ fn files() -> (Option<PathBuf>, Option<PathBuf>) {
             })
     };
     let regular = find("sans-serif:weight=regular");
-    let semibold = find("sans-serif:weight=semibold").filter(|s| Some(s) != regular.as_ref());
+    let semibold = find("sans-serif:weight=medium").filter(|s| Some(s) != regular.as_ref());
     (regular, semibold)
 }
 

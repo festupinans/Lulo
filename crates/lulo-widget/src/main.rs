@@ -668,9 +668,9 @@ fn draw_chip(painter: &Painter, rect: Rect, s: &Session, state: &str, on: bool, 
     let text_w = (inner.right() - text_x).max(10.0);
     // How long it has been in this state, small at the top right; the
     // name gets what is left of the line.
-    let time = s.elapsed(state, now).map(|secs| {
-        painter.layout_no_wrap(sessions::duration(secs), FontId::proportional(10.5), MUTED)
-    });
+    let time = s
+        .elapsed(state, now)
+        .map(|secs| painter.layout_no_wrap(sessions::duration(secs), fonts::regular(10.5), MUTED));
     let time_w = time.as_ref().map_or(0.0, |g| g.size().x + 6.0);
     let name = painter.layout_job(one_line(
         &s.project,
@@ -684,7 +684,7 @@ fn draw_chip(painter: &Painter, rect: Rect, s: &Session, state: &str, on: bool, 
     let extra = (s.background > 0 && !matches!(state, "background" | "subagent")).then(|| {
         painter.layout_no_wrap(
             format!("+{}", s.background),
-            FontId::proportional(10.5),
+            fonts::regular(10.5),
             style::look("background").color,
         )
     });
